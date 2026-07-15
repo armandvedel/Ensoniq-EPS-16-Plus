@@ -18,11 +18,19 @@ void ProbeMachineSink::configure(std::string romPath, std::string kpcPath,
     disk = std::move(osDiskPath);
 }
 
-void ProbeMachineSink::prepare(double) {
+void ProbeMachineSink::prepare(double dawSampleRate) {
+    if (!resampler.prepare(dawSampleRate)) {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = "unsupported DAW sample rate";
+        ready.store(false, std::memory_order_release);
+        return;
+    }
     char error[256]{};
     if (eps16_probe_machine_initialize(rom.c_str(), kpc.c_str(), disk.c_str(),
                                        error, sizeof(error))) {
         cycleBase = eps16_probe_machine_cycles();
+        Eps16ProbeAudioFrame staleFrames[32];
+        while (eps16_probe_machine_drain_audio(staleFrames, 32) == 32) {}
         {
             const std::lock_guard<std::mutex> lock(statusMutex);
             statusText = "authentic machine running";
@@ -41,6 +49,16 @@ void ProbeMachineSink::prepare(double) {
 void ProbeMachineSink::runUntil(std::uint64_t absoluteCpuCycle) {
     if (!isReady()) return;
     eps16_probe_machine_run_until(cycleBase + absoluteCpuCycle);
+    Eps16ProbeAudioFrame frames[32];
+    for (;;) {
+        const auto count = eps16_probe_machine_drain_audio(frames, 32);
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto &frame = frames[index];
+            resampler.push(frame.cpu_cycle - cycleBase, frame.clock_divider,
+                           frame.left, frame.right);
+        }
+        if (count < 32) break;
+    }
     publishDisplay();
 }
 
@@ -62,13 +80,14 @@ void ProbeMachineSink::samplingInput(float left, float right, std::uint64_t) {
     if (isReady()) eps16_probe_machine_sampling_input(left, right);
 }
 
-void ProbeMachineSink::stereoOutput(float &left, float &right, std::uint64_t) {
+void ProbeMachineSink::stereoOutput(float &left, float &right,
+                                    std::uint64_t cycle) {
     if (!isReady()) {
         left = 0.0f;
         right = 0.0f;
         return;
     }
-    eps16_probe_machine_stereo_output(&left, &right);
+    resampler.output(cycle, left, right);
 }
 
 void ProbeMachineSink::publishDisplay() {

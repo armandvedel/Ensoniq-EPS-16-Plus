@@ -55,6 +55,8 @@ juce_add_plugin(Eps16Plus
 )
 
 target_sources(Eps16Plus PRIVATE
+  BandlimitedResampler.cpp
+  BandlimitedResampler.h
   ProbeMachineSink.cpp
   ProbeMachineSink.h
   PluginProcessor.cpp
@@ -92,6 +94,16 @@ add_executable(eps16_vst3_bridge_test BridgeTest.cpp)
 target_link_libraries(eps16_vst3_bridge_test PRIVATE eps16_vst3_bridge)
 target_compile_options(eps16_vst3_bridge_test PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME vst3_bridge COMMAND eps16_vst3_bridge_test)
+
+add_executable(eps16_bandlimited_resampler_test
+  BandlimitedResampler.cpp
+  BandlimitedResamplerTest.cpp
+)
+target_compile_options(eps16_bandlimited_resampler_test PRIVATE
+  -Wall -Wextra -Wpedantic
+)
+add_test(NAME vst3_bandlimited_resampler
+         COMMAND eps16_bandlimited_resampler_test)
 
 add_executable(eps16_probe_machine_test ProbeMachineTest.c)
 target_link_libraries(eps16_probe_machine_test PRIVATE eps16_probe_machine)

@@ -55,6 +55,7 @@ void Eps16PlusProcessor::prepareToPlay(double sampleRate, int) {
                           getResourcePath(kpcPathKey).toStdString(),
                           getResourcePath(osDiskPathKey).toStdString());
     bridge.prepare(sampleRate);
+    setLatencySamples(eps16::vst3::BandlimitedResampler::latencySamples(sampleRate));
 }
 
 bool Eps16PlusProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const {

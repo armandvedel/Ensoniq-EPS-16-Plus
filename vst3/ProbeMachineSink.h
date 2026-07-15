@@ -1,6 +1,7 @@
 #ifndef EPS16_VST3_PROBE_MACHINE_SINK_H
 #define EPS16_VST3_PROBE_MACHINE_SINK_H
 
+#include "BandlimitedResampler.h"
 #include "EmulatorBridge.h"
 
 #include <array>
@@ -54,6 +55,7 @@ private:
     std::atomic<int> displayCursorEnd{-1};
     std::atomic<bool> ready{};
     std::uint64_t cycleBase{};
+    BandlimitedResampler resampler;
 };
 
 } // namespace eps16::vst3

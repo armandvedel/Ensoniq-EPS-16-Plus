@@ -30,6 +30,10 @@ the verified machine is mechanically extracted from `rom_probe.c`.
 - Stereo DAW input delivery to the emulator sampling boundary for every audio
   sample.
 - Stereo output delivery exclusively through the plug-in process callback.
+- Hardware-timestamped ES5505/ES5510 output at the rate selected by the
+  ES5505 active-voice register. A deterministic 48-tap polyphase resampler
+  converts that native stream to the DAW rate without sample-and-hold images.
+  Its fixed 12,288-cycle latency is reported to the host.
 - Native original-layout panel surface. Buttons send raw KPC transitions only;
   they do not implement modes, menus or display state. Unverified RECORD,
   STOP/CONTINUE and PLAY mappings are visible but disabled.
@@ -43,9 +47,11 @@ the verified machine is mechanically extracted from `rom_probe.c`.
 - VOLUME maps to analog channel 5. DATA ENTRY uses the documented GUI
   `0..1023` to raw ADC `0..715` mapping on channel 3.
 
-The current sink is deliberately silent. This milestone is a scan/load/UI/I/O
-and scheduling prototype, not yet an audible EPS emulator. It must not be
-presented as the completed emulator.
+The current sink executes the authentic machine and is audible, but its state
+is still file-static inside the loaded VST module. It is therefore not yet
+safe for multiple independent instances. Hosts may retain that state after an
+instance is removed because they normally keep the module loaded; complete
+instance ownership remains the next extraction milestone.
 
 ## Deterministic callback contract
 
@@ -96,8 +102,8 @@ small compiling steps:
 3. Expose external resource loading, physical panel bytes, MIDI bytes, stereo
    sampling input, `runUntil(cycle)` and stereo rendering through the sink
    implemented in this milestone.
-4. Replace the silent sink only after a deterministic boot regression reaches
-   the same original-OS display and audio hashes as `rom_probe`.
+4. Preserve deterministic boot, original-OS display and audio regressions
+   while replacing the temporary singleton sink with the extracted machine.
 5. Keep the legacy KPC path opt-in rules from `docs/kpc-migration.md`; do not
    delete provisional behavior until its ten acceptance tests pass.
 

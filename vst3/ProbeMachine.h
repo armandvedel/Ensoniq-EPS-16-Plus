@@ -13,6 +13,14 @@ int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
                                    char *error, size_t error_size);
 int eps16_probe_machine_is_initialized(void);
 void eps16_probe_machine_run_until(uint64_t cpu_cycle);
+typedef struct {
+    uint64_t cpu_cycle;
+    uint32_t clock_divider;
+    float left;
+    float right;
+} Eps16ProbeAudioFrame;
+size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
+                                       size_t capacity);
 void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2);
 void eps16_probe_machine_panel_byte(uint8_t value);
 void eps16_probe_machine_analog(unsigned int channel, uint16_t value);

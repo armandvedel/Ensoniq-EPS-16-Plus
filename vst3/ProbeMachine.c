@@ -20,6 +20,10 @@ static int16_t plugin_input_sample;
 static int plugin_input_valid;
 static float plugin_output_left;
 static float plugin_output_right;
+enum { PLUGIN_AUDIO_QUEUE_CAPACITY = 1024 };
+static Eps16ProbeAudioFrame plugin_audio_queue[PLUGIN_AUDIO_QUEUE_CAPACITY];
+static size_t plugin_audio_queue_read;
+static size_t plugin_audio_queue_write;
 static uint8_t plugin_panel_pair[2];
 static size_t plugin_panel_pair_count;
 
@@ -27,11 +31,25 @@ static void plugin_error(char *error, size_t error_size, const char *message) {
     if (error && error_size) snprintf(error, error_size, "%s", message);
 }
 
-static void plugin_render_audio(uint64_t elapsed_cycles) {
+static void plugin_queue_audio(uint64_t cycle, uint32_t divider,
+                               float left, float right) {
+    const size_t next = (plugin_audio_queue_write + 1) % PLUGIN_AUDIO_QUEUE_CAPACITY;
+    if (next == plugin_audio_queue_read)
+        plugin_audio_queue_read = (plugin_audio_queue_read + 1) % PLUGIN_AUDIO_QUEUE_CAPACITY;
+    plugin_audio_queue[plugin_audio_queue_write] =
+        (Eps16ProbeAudioFrame){cycle, divider, left, right};
+    plugin_audio_queue_write = next;
+}
+
+static void plugin_render_audio(uint64_t elapsed_cycles, uint64_t end_cycle) {
     const uint32_t output_divider = es5505_core_output_divider(&es5505);
     plugin_audio_cycle_accumulator += elapsed_cycles;
     uint64_t frames_due = plugin_audio_cycle_accumulator / output_divider;
     plugin_audio_cycle_accumulator %= output_divider;
+    uint64_t frame_cycle = frames_due
+        ? end_cycle - plugin_audio_cycle_accumulator -
+              (frames_due - 1) * output_divider
+        : 0;
     while (frames_due) {
         int32_t buses[ES5505_STEREO_BUSES * 2][64];
         int32_t *bus_outputs[ES5505_STEREO_BUSES * 2];
@@ -65,6 +83,9 @@ static void plugin_render_audio(uint64_t elapsed_cycles) {
                 apply_master_volume((int32_t)esp_outputs[1] << 4);
             plugin_output_left = (float)audio_to_pcm16(output_left) / 32768.0f;
             plugin_output_right = (float)audio_to_pcm16(output_right) / 32768.0f;
+            plugin_queue_audio(frame_cycle, output_divider,
+                               plugin_output_left, plugin_output_right);
+            frame_cycle += output_divider;
         }
     }
 }
@@ -160,7 +181,7 @@ void eps16_probe_machine_run_until(uint64_t target_cycle) {
         }
         const uint64_t elapsed = plugin_executed - plugin_audio_scheduled_cycle;
         plugin_audio_scheduled_cycle = plugin_executed;
-        plugin_render_audio(elapsed);
+        plugin_render_audio(elapsed, plugin_executed);
         if (es5505_core_irq_pending(&es5505)) {
             m68k_set_irq(1);
             plugin_executed += (uint64_t)m68k_execute(128);
@@ -170,6 +191,18 @@ void eps16_probe_machine_run_until(uint64_t target_cycle) {
             ++es5505_irqs;
         }
     }
+}
+
+size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
+                                       size_t capacity) {
+    if (!frames || !capacity) return 0;
+    size_t count = 0;
+    while (count < capacity && plugin_audio_queue_read != plugin_audio_queue_write) {
+        frames[count++] = plugin_audio_queue[plugin_audio_queue_read];
+        plugin_audio_queue_read =
+            (plugin_audio_queue_read + 1) % PLUGIN_AUDIO_QUEUE_CAPACITY;
+    }
+    return count;
 }
 
 void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2) {

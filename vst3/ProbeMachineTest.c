@@ -90,6 +90,25 @@ int main(int argc, char **argv) {
         return 1;
     printf("playback_peak=%f\n", playback_peak);
     if (playback_peak < 0.00001f) return 1;
+    Eps16ProbeAudioFrame queued[64];
+    uint64_t previous_audio_cycle = 0;
+    size_t queued_audio_frames = 0;
+    for (;;) {
+        const size_t count = eps16_probe_machine_drain_audio(queued, 64);
+        for (size_t index = 0; index < count; ++index) {
+            if (queued[index].cpu_cycle < previous_audio_cycle ||
+                queued[index].clock_divider < 16 ||
+                queued[index].clock_divider > 512 ||
+                queued[index].clock_divider % 16)
+                return 1;
+            previous_audio_cycle = queued[index].cpu_cycle;
+        }
+        queued_audio_frames += count;
+        if (count < 64) break;
+    }
+    printf("queued_audio_frames=%zu last_audio_cycle=%llu\n",
+           queued_audio_frames, (unsigned long long)previous_audio_cycle);
+    if (!queued_audio_frames) return 1;
     eps16_probe_machine_midi(0x80, 60, 0);
     run_for(1000000);
     return 0;
