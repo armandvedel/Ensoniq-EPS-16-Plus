@@ -57,7 +57,7 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     vfd.setColour(juce::Label::textColourId, displayColour);
     addAndMakeVisible(vfd);
 
-    status.setText("VST3 adapter active - emulator core extraction pending",
+    status.setText("VST3 adapter active - waiting for authentic emulator boot",
                    juce::dontSendNotification);
     status.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
     addAndMakeVisible(status);
@@ -164,9 +164,11 @@ void Eps16PanelEditor::timerCallback() {
         if (row->path.getText() != discovered)
             row->path.setText(discovered, juce::dontSendNotification);
     }
-    status.setText("VST3 adapter active | DAW-driven CPU cycles: " +
-                       juce::String(owner.cpuCycles()) +
-                       " | emulator core extraction pending",
+    vfd.setText(owner.machineDisplay(), juce::dontSendNotification);
+    status.setText("DAW-driven CPU cycles: " + juce::String(owner.cpuCycles()) +
+                       " | " + owner.machineStatus() +
+                       " | illegal instructions: " +
+                       juce::String(owner.illegalInstructions()),
                    juce::dontSendNotification);
 }
 

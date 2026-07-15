@@ -2,6 +2,7 @@
 #define EPS16_VST3_PLUGIN_PROCESSOR_H
 
 #include "EmulatorBridge.h"
+#include "ProbeMachineSink.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -44,6 +45,12 @@ public:
     void refreshResourcePaths();
     static juce::File defaultResourceDirectory();
     std::uint64_t cpuCycles() const { return bridge.cpuCycles(); }
+    bool machineReady() const { return machineSink.isReady(); }
+    juce::String machineStatus() const { return machineSink.status(); }
+    juce::String machineDisplay() const { return machineSink.display(); }
+    std::size_t illegalInstructions() const {
+        return machineSink.illegalInstructions();
+    }
 
     static const juce::Identifier romPathKey;
     static const juce::Identifier kpcPathKey;
@@ -51,8 +58,8 @@ public:
 
 private:
     static constexpr std::size_t maximumMidiEvents = 1024;
-    eps16::vst3::SilentSink silentSink;
-    eps16::vst3::EmulatorBridge bridge{silentSink};
+    eps16::vst3::ProbeMachineSink machineSink;
+    eps16::vst3::EmulatorBridge bridge{machineSink};
     std::array<eps16::vst3::MidiEvent, maximumMidiEvents> midiEvents{};
     juce::ValueTree state{"EPS16PlusPrototype"};
 

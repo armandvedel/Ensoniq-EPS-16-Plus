@@ -22,6 +22,23 @@ add_library(eps16_vst3_bridge STATIC
 target_include_directories(eps16_vst3_bridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_options(eps16_vst3_bridge PRIVATE -Wall -Wextra -Wpedantic)
 
+add_library(eps16_probe_machine STATIC
+  ProbeMachine.c
+  ProbeMachine.h
+  ../native/kpc_legacy.c
+  ../native/kpc_firmware.c
+  ../native/kpc_device.c
+  ../native/m68hc11_core.c
+  ../native/es5505_core.c
+  ../native/es5510_core.c
+  ../native/hfe_disk.c
+)
+target_include_directories(eps16_probe_machine PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_SOURCE_DIR}/native"
+)
+target_link_libraries(eps16_probe_machine PUBLIC musashi)
+
 juce_add_plugin(Eps16Plus
   COMPANY_NAME "EPS-16 Plus Emulator"
   BUNDLE_ID "org.eps16plus.prototype"
@@ -38,13 +55,17 @@ juce_add_plugin(Eps16Plus
 )
 
 target_sources(Eps16Plus PRIVATE
+  ProbeMachineSink.cpp
+  ProbeMachineSink.h
   PluginProcessor.cpp
   PluginProcessor.h
   PanelEditor.cpp
   PanelEditor.h
 )
+target_include_directories(Eps16Plus PRIVATE "${CMAKE_SOURCE_DIR}/native")
 target_link_libraries(Eps16Plus PRIVATE
   eps16_vst3_bridge
+  eps16_probe_machine
   juce::juce_audio_processors
   juce::juce_gui_basics
   juce::juce_recommended_config_flags
@@ -71,3 +92,6 @@ add_executable(eps16_vst3_bridge_test BridgeTest.cpp)
 target_link_libraries(eps16_vst3_bridge_test PRIVATE eps16_vst3_bridge)
 target_compile_options(eps16_vst3_bridge_test PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME vst3_bridge COMMAND eps16_vst3_bridge_test)
+
+add_executable(eps16_probe_machine_test ProbeMachineTest.c)
+target_link_libraries(eps16_probe_machine_test PRIVATE eps16_probe_machine)

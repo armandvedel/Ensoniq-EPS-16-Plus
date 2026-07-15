@@ -23,3 +23,20 @@ Typical installed layout:
       eps16plus-rom.bin
       eps16plus-kpc.bin
       EPS130OS.img
+
+Ableton Live sampling
+---------------------
+
+The plug-in is an instrument. Its stereo "Sampling Input" is an auxiliary
+input so Live can route audio to it through the plug-in's sidechain/input
+chooser while MIDI remains on the instrument track. The EPS panel and OS own
+the sampling sequence:
+
+  SAMPLE -> TRACK 1 -> wait for * -> ENTER to record -> ENTER to stop
+
+When "PLAY ROOT KEY" appears, send a MIDI note from the Live track. DAW MIDI
+acts as the EPS keyboard; the plug-in intentionally has no separate on-screen
+keyboard.
+
+If the files were added after the plug-in was opened, remove and insert the
+plug-in once so the authentic machine can initialize from reset.

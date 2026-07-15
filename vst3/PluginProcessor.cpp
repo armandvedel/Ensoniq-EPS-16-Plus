@@ -40,17 +40,27 @@ const juce::Identifier Eps16PlusProcessor::osDiskPathKey{"osDiskPath"};
 
 Eps16PlusProcessor::Eps16PlusProcessor()
     : AudioProcessor(BusesProperties()
+          /* Keep the instrument's main input disabled and expose sampling as
+             an auxiliary input. Hosts such as Ableton Live then present it as
+             a routable sidechain source on a MIDI/instrument track. */
+          .withInput("Main Input", juce::AudioChannelSet::stereo(), false)
           .withInput("Sampling Input", juce::AudioChannelSet::stereo(), true)
           .withOutput("Main Output", juce::AudioChannelSet::stereo(), true)) {
     refreshResourcePaths();
 }
 
 void Eps16PlusProcessor::prepareToPlay(double sampleRate, int) {
+    refreshResourcePaths();
+    machineSink.configure(getResourcePath(romPathKey).toStdString(),
+                          getResourcePath(kpcPathKey).toStdString(),
+                          getResourcePath(osDiskPathKey).toStdString());
     bridge.prepare(sampleRate);
 }
 
 bool Eps16PlusProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const {
-    return layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo() &&
+    return layouts.inputBuses.size() == 2 &&
+           layouts.getChannelSet(true, 0).isDisabled() &&
+           layouts.getChannelSet(true, 1) == juce::AudioChannelSet::stereo() &&
            layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
@@ -58,8 +68,10 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                                       juce::MidiBuffer &midi) {
     juce::ScopedNoDenormals noDenormals;
     const auto samples = buffer.getNumSamples();
-    const float *inputLeft = buffer.getReadPointer(0);
-    const float *inputRight = buffer.getReadPointer(1);
+    auto samplingInput = getBusBuffer(buffer, true, 1);
+    auto mainOutput = getBusBuffer(buffer, false, 0);
+    const float *inputLeft = samplingInput.getReadPointer(0);
+    const float *inputRight = samplingInput.getReadPointer(1);
     std::size_t eventCount = 0;
     for (const auto metadata : midi) {
         if (eventCount == midiEvents.size()) break;
@@ -73,8 +85,8 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
             static_cast<std::uint8_t>(length > 2 ? raw[2] : 0)};
     }
 
-    bridge.process(inputLeft, inputRight, buffer.getWritePointer(0),
-                   buffer.getWritePointer(1), samples, midiEvents.data(), eventCount);
+    bridge.process(inputLeft, inputRight, mainOutput.getWritePointer(0),
+                   mainOutput.getWritePointer(1), samples, midiEvents.data(), eventCount);
     midi.clear();
 }
 

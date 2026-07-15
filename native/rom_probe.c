@@ -99,6 +99,10 @@ static unsigned int es5510_host_serial_writes;
 static int es5510_host_upload_active;
 static uint64_t es5510_host_access_until;
 static int live_mode;
+/* A plug-in host supplies input from the DAW callback while retaining the
+   offline probe's emulated-cycle ADC pacing.  The normal CLI/live modes leave
+   this disabled. */
+static int deterministic_host_input;
 static uint64_t es5510_input_next_cycle;
 static uint64_t es5510_input_next_time_ns;
 static uint64_t es5510_input_last_poll_time_ns;
@@ -128,7 +132,7 @@ static uint32_t es5510_sampling_input(void) {
     if (selector < 2 || selector > 8) selector = 3; /* normal 29.8 kHz default */
     unsigned int divider = selector * 7;
     uint32_t target_rate = 625000U / divider;
-    if (live_mode) {
+    if (live_mode && !deterministic_host_input) {
         /* A live ADC is clocked by the physical sampling oscillator, not by
            however quickly the host happens to execute 68000 instructions.
            Keep an absolute oscillator phase. */
@@ -154,7 +158,8 @@ static uint32_t es5510_sampling_input(void) {
         es5510_input_next_cycle = cycle + (uint64_t)divider * 16;
     }
     int16_t input = 0;
-    if (live_mode && !live_host_audio_input_sample(target_rate, &input))
+    if ((live_mode || deterministic_host_input) &&
+        !live_host_audio_input_sample(target_rate, &input))
         return 0;
     ++es5510_input_valid;
     return ((uint32_t)(uint16_t)input << 8) | 0x01;
