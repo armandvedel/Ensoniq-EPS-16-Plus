@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EPS-16 Plus Panel Recorder</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div><span class="brand">ENSONIQ</span><span class="model">EPS-16 PLUS</span></div>
+      <div class="status"><span class="lamp"></span> <span id="live-status">PANEL RECORDER</span></div>
+    </header>
+
+    <section class="panel" aria-label="EPS-16 Plus Bedienfeld">
+      <div class="fader-column">
+        <label for="volume-fader">VOLUME</label>
+        <input id="volume-fader" class="vertical-fader" type="range" min="0" max="1023" value="1023">
+        <output id="volume-value" for="volume-fader">1023</output>
+      </div>
+      <div class="left-column">
+        <button class="panel-key" data-action="LOAD" data-code="15"><span class="keycap"></span><span class="key-label">LOAD</span></button>
+        <button class="panel-key" data-action="COMMAND" data-code="6"><span class="keycap"></span><span class="key-label">COMMAND</span></button>
+        <button class="panel-key" data-action="EDIT" data-code="5"><span class="keycap"></span><span class="key-label">EDIT</span></button>
+      </div>
+
+      <div class="main-panel">
+        <div class="display-wrap">
+          <div class="display-indicators">
+            <span id="mode-indicator">LOAD</span>
+            <span id="page-indicator">INST</span>
+            <span id="type-indicator"></span>
+            <span class="seq-status">STOP</span>
+          </div>
+          <div id="display" class="display" aria-live="polite">READY — INSERT INSTRUMENT DISK</div>
+          <div class="display-caption">ORIGINAL OS DISPLAY · 22 CHARACTERS</div>
+        </div>
+
+        <div class="page-row">
+          <button class="panel-key" data-action="INSTRUMENT" data-code="26"><span class="keycap"></span><span class="key-label">INSTRUMENT</span></button>
+          <button class="panel-key" data-action="SEQ-SONG" data-code="21"><span class="keycap"></span><span class="key-label">SEQ·SONG</span></button>
+          <button class="panel-key" data-action="SYSTEM-MIDI" data-code="27"><span class="keycap"></span><span class="key-label">SYSTEM·MIDI</span></button>
+          <button class="panel-key" data-action="EFFECTS" data-code="9"><span class="keycap"></span><span class="key-label">EFFECTS</span></button>
+          <button class="panel-key numeric-key" data-action="1-ENV1" data-code="13"><span class="key-number">1</span><span class="keycap"></span><span class="key-label">ENV 1</span></button>
+          <button class="panel-key numeric-key" data-action="2-ENV2" data-code="18"><span class="key-number">2</span><span class="keycap"></span><span class="key-label">ENV 2</span></button>
+          <button class="panel-key numeric-key" data-action="3-ENV3" data-code="19"><span class="key-number">3</span><span class="keycap"></span><span class="key-label">ENV 3</span></button>
+          <button class="panel-key numeric-key" data-action="4-PITCH" data-code="24"><span class="key-number">4</span><span class="keycap"></span><span class="key-label">PITCH</span></button>
+          <button class="panel-key numeric-key" data-action="5-FILTER" data-code="25"><span class="key-number">5</span><span class="keycap"></span><span class="key-label">FILTER</span></button>
+          <button class="panel-key numeric-key" data-action="6-AMP" data-code="30"><span class="key-number">6</span><span class="keycap"></span><span class="key-label">AMP</span></button>
+          <button class="panel-key numeric-key" data-action="7-LFO" data-code="31"><span class="key-number">7</span><span class="keycap"></span><span class="key-label">LFO</span></button>
+          <button class="panel-key numeric-key" data-action="8-WAVE" data-code="36"><span class="key-number">8</span><span class="keycap"></span><span class="key-label">WAVE</span></button>
+          <button class="panel-key numeric-key" data-action="9-LAYER" data-code="37"><span class="key-number">9</span><span class="keycap"></span><span class="key-label">LAYER</span></button>
+          <button class="panel-key numeric-key" data-action="0-TRACK" data-code="12"><span class="key-number">0</span><span class="keycap"></span><span class="key-label">TRACK</span></button>
+        </div>
+
+        <div class="transport-row">
+          <button data-action="SAMPLE" data-code="32">SAMPLE</button>
+          <button data-action="RECORD" data-code="16">● RECORD</button>
+          <button data-action="STOP-CONTINUE" data-code="53">■ STOP / CONTINUE</button>
+          <button data-action="PLAY" data-code="22">▶ PLAY</button>
+          <span class="spacer"></span>
+          <button data-action="UP" data-code="10">▲</button>
+          <button data-action="DOWN" data-code="11">▼</button>
+          <button data-action="LEFT" data-code="16">◀</button>
+          <button data-action="RIGHT" data-code="17">▶</button>
+          <button data-action="CANCEL-NO" data-code="33">CANCEL · NO</button>
+          <button class="enter" data-action="ENTER-YES" data-code="35">ENTER · YES</button>
+        </div>
+
+        <div class="track-row" aria-label="Instrument Tracks">
+          <span class="track-label">INSTRUMENT · TRACK</span>
+          <button data-action="TRACK-1" data-code="2">1</button>
+          <button data-action="TRACK-2" data-code="8">2</button>
+          <button data-action="TRACK-3" data-code="14">3</button>
+          <button data-action="TRACK-4" data-code="20">4</button>
+          <button data-action="TRACK-5" data-code="4">5</button>
+          <button data-action="TRACK-6" data-code="34">6</button>
+          <button data-action="TRACK-7" data-code="28">7</button>
+          <button data-action="TRACK-8" data-code="22">8</button>
+          <button data-action="EFFECT-SELECT" data-code="7">EFFECT SELECT · BYPASS</button>
+        </div>
+      </div>
+      <div class="fader-column">
+        <label for="data-entry-fader">DATA ENTRY</label>
+        <input id="data-entry-fader" class="vertical-fader" type="range" min="0" max="1023" value="512">
+        <output id="data-entry-value" for="data-entry-fader">512</output>
+      </div>
+    </section>
+
+    <section class="live-keyboard" aria-label="Spielbare Tastatur">
+      <div class="section-title">LIVE KEYBOARD · C3–C5</div>
+      <div id="piano"></div>
+      <p>Computertastatur: A W S E D F T G Z H U J K · alternativ MIDI-Keyboard</p>
+    </section>
+
+    <section class="workbench">
+      <div class="workflow">
+        <div class="section-title">LOAD-INSTRUMENT TEST</div>
+        <ol id="expected">
+          <li data-step="LOAD">LOAD</li>
+          <li class="optional">Optional: Up/Down für anderes File</li>
+          <li data-step="ENTER-YES">ENTER zum Laden</li>
+          <li data-step="TRACK">Zielspur 1–8 (startet Laden)</li>
+        </ol>
+        <label class="disk">Instrument-Disk
+          <input id="disk" type="file" accept=".img,.hfe">
+        </label>
+      </div>
+      <div class="log-panel">
+        <div class="log-head">
+          <span>EVENT LOG</span>
+          <button id="enable-mic" class="utility">MIC INPUT</button>
+          <span id="mic-meter" class="mic-meter">MIC —</span>
+          <label class="mic-gain" for="mic-gain">GAIN
+            <input id="mic-gain" type="range" min="1" max="32" step="1" value="1">
+            <output id="mic-gain-value" for="mic-gain">1×</output>
+          </label>
+          <button id="mount-instrument" class="utility">ED-001 EINLEGEN</button>
+          <button id="mount-os" class="utility">OS-DISK EINLEGEN</button>
+          <button id="clear" class="utility">CLEAR</button>
+          <button id="copy" class="utility">COPY JSON</button>
+        </div>
+        <pre id="log">Noch keine Eingabe.</pre>
+        <p class="note">36 Tasten + Volume/Data Entry. Dieses Panel verändert keine Originaldateien.</p>
+      </div>
+      <div class="raw-probe">
+        <div class="section-title">RAW MATRIX PROBE · NICHT BESCHRIFTETE CODES</div>
+        <div id="raw-probe" class="raw-grid" aria-label="Raw Matrix Probe"></div>
+        <p class="note">Zum Verifizieren fehlender Tasten. Die normalen Button-Labels bleiben deaktiviert, bis der Code gegen das Original-OS belegt ist.</p>
+      </div>
+    </section>
+  </main>
+  <script src="menu-catalog.js"></script>
+  <script src="live.js?v=20260714-12"></script>
+</body>
+</html>

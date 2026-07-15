@@ -1,0 +1,6 @@
+*.hfe
+*.img
+*.bin
+__pycache__/
+work/
+tmp/
