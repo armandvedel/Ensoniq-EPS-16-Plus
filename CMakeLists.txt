@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(eps16_emulator_foundation VERSION 0.2.1 LANGUAGES C CXX)
+project(eps16_emulator_foundation VERSION 0.2.2 LANGUAGES C CXX)
 
 option(EPS16_BUILD_VST3 "Build the separated macOS VST3 prototype" OFF)
 

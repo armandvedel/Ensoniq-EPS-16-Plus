@@ -5,6 +5,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -63,6 +64,16 @@ private:
     juce::Slider masterVolume;
     juce::Slider dataEntry;
     std::vector<std::unique_ptr<PanelButton>> buttons;
+    std::array<PanelButton *, 12> pageButtons{};
+    std::array<PanelButton *, 7> modeButtons{};
+    std::array<PanelButton *, 8> trackButtons{};
+    std::array<PanelButton *, 3> sequencerButtons{};
+    PanelButton *upButton{};
+    PanelButton *downButton{};
+    PanelButton *leftButton{};
+    PanelButton *rightButton{};
+    PanelButton *cancelButton{};
+    PanelButton *enterButton{};
     ResourceRow romRow{Eps16PlusProcessor::romPathKey, "ROM..."};
     ResourceRow kpcRow{Eps16PlusProcessor::kpcPathKey, "KPC..."};
     ResourceRow diskRow{Eps16PlusProcessor::osDiskPathKey, "OS Disk..."};
