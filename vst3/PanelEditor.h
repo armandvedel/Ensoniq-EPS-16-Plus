@@ -21,11 +21,13 @@ private:
     class VfdLabel final : public juce::Label {
     public:
         void setCursorRange(int start, int end);
+        void setDecimalMask(std::uint32_t mask);
         void paint(juce::Graphics &) override;
 
     private:
         int cursorStart{-1};
         int cursorEnd{-1};
+        std::uint32_t decimalMask{};
     };
 
     class PanelButton final : public juce::TextButton {
@@ -43,19 +45,8 @@ private:
         bool pressed{};
     };
 
-    struct ResourceRow {
-        ResourceRow(juce::Identifier keyToUse, const juce::String &buttonText)
-            : key(std::move(keyToUse)), chooser(buttonText) {}
-        juce::Identifier key;
-        juce::TextButton chooser;
-        juce::Label path;
-        std::unique_ptr<juce::FileChooser> fileChooser;
-    };
-
     PanelButton &addPanelButton(const juce::String &, std::uint8_t,
                                 bool known = true);
-    void chooseResource(ResourceRow &row, const juce::String &title,
-                        const juce::String &pattern);
     void timerCallback() override;
 
     Eps16PlusProcessor &owner;
@@ -74,10 +65,6 @@ private:
     PanelButton *rightButton{};
     PanelButton *cancelButton{};
     PanelButton *enterButton{};
-    ResourceRow romRow{Eps16PlusProcessor::romPathKey, "ROM..."};
-    ResourceRow kpcRow{Eps16PlusProcessor::kpcPathKey, "KPC..."};
-    ResourceRow diskRow{Eps16PlusProcessor::osDiskPathKey, "OS Disk..."};
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Eps16PanelEditor)
 };
 

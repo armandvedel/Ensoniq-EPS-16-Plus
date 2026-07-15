@@ -50,6 +50,9 @@ public:
     juce::String machineDisplay() const { return machineSink.display(); }
     int machineCursorStart() const { return machineSink.cursorStart(); }
     int machineCursorEnd() const { return machineSink.cursorEnd(); }
+    std::uint32_t machineDecimalMask() const {
+        return machineSink.decimalMask();
+    }
     std::size_t illegalInstructions() const {
         return machineSink.illegalInstructions();
     }
@@ -64,6 +67,7 @@ private:
     eps16::vst3::EmulatorBridge bridge{machineSink};
     std::array<eps16::vst3::MidiEvent, maximumMidiEvents> midiEvents{};
     juce::ValueTree state{"EPS16PlusPrototype"};
+    juce::MemoryBlock pendingMachineState;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Eps16PlusProcessor)
 };

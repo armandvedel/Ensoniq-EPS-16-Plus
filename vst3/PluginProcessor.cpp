@@ -4,6 +4,9 @@
 #include <dlfcn.h>
 
 namespace {
+constexpr std::uint32_t vstStateMagic = 0x45505356U; // EPSV
+constexpr std::uint32_t vstStateVersion = 1;
+
 void modulePathAnchor() {}
 
 juce::File moduleFile() {
@@ -55,6 +58,12 @@ void Eps16PlusProcessor::prepareToPlay(double sampleRate, int) {
                           getResourcePath(kpcPathKey).toStdString(),
                           getResourcePath(osDiskPathKey).toStdString());
     bridge.prepare(sampleRate);
+    if (machineSink.isReady() && pendingMachineState.getSize() > 0 &&
+        machineSink.restoreState(pendingMachineState.getData(),
+                                 pendingMachineState.getSize())) {
+        bridge.resetTimeline();
+        pendingMachineState.reset();
+    }
     setLatencySamples(eps16::vst3::BandlimitedResampler::latencySamples(sampleRate));
 }
 
@@ -96,16 +105,62 @@ juce::AudioProcessorEditor *Eps16PlusProcessor::createEditor() {
 }
 
 void Eps16PlusProcessor::getStateInformation(juce::MemoryBlock &destination) {
-    if (const auto xml = state.createXml()) copyXmlToBinary(*xml, destination);
+    const juce::ScopedLock lock(getCallbackLock());
+    const auto xmlText = state.toXmlString();
+    const auto machine = machineSink.captureState();
+    juce::MemoryOutputStream output(destination, false);
+    output.writeInt(static_cast<int>(vstStateMagic));
+    output.writeInt(static_cast<int>(vstStateVersion));
+    output.writeInt64(static_cast<juce::int64>(xmlText.getNumBytesAsUTF8()));
+    output.writeInt64(static_cast<juce::int64>(machine.size()));
+    output.write(xmlText.toRawUTF8(), xmlText.getNumBytesAsUTF8());
+    if (!machine.empty()) output.write(machine.data(), machine.size());
 }
 
 void Eps16PlusProcessor::setStateInformation(const void *data, int size) {
-    if (const auto xml = getXmlFromBinary(data, size)) {
-        const auto restored = juce::ValueTree::fromXml(*xml);
-        if (restored.hasType(state.getType())) {
-            state = restored;
-            refreshResourcePaths();
+    juce::ValueTree restoredTree;
+    juce::MemoryBlock restoredMachine;
+    bool recognizedContainer = false;
+    if (data && size >= 24) {
+        juce::MemoryInputStream input(data, static_cast<std::size_t>(size), false);
+        const auto magic = static_cast<std::uint32_t>(input.readInt());
+        const auto version = static_cast<std::uint32_t>(input.readInt());
+        const auto xmlSize = input.readInt64();
+        const auto machineSize = input.readInt64();
+        const auto remaining = static_cast<juce::int64>(size) - 24;
+        recognizedContainer = magic == vstStateMagic;
+        if (magic == vstStateMagic && version == vstStateVersion &&
+            xmlSize >= 0 && machineSize >= 0 &&
+            xmlSize + machineSize == remaining && xmlSize <= 1024 * 1024 &&
+            machineSize <= 128 * 1024 * 1024) {
+            juce::MemoryBlock xmlData(static_cast<std::size_t>(xmlSize) + 1, true);
+            if (input.read(xmlData.getData(), static_cast<int>(xmlSize)) == xmlSize) {
+                const auto xml = juce::parseXML(juce::String::fromUTF8(
+                    static_cast<const char *>(xmlData.getData()),
+                    static_cast<int>(xmlSize)));
+                if (xml) restoredTree = juce::ValueTree::fromXml(*xml);
+                restoredMachine.setSize(static_cast<std::size_t>(machineSize));
+                if (machineSize > 0 &&
+                    input.read(restoredMachine.getData(),
+                               static_cast<int>(machineSize)) != machineSize)
+                    restoredMachine.reset();
+            }
         }
+    }
+    if (!recognizedContainer)
+        if (const auto xml = getXmlFromBinary(data, size))
+            restoredTree = juce::ValueTree::fromXml(*xml);
+
+    if (!restoredTree.hasType(state.getType())) return;
+    const juce::ScopedLock lock(getCallbackLock());
+    state = restoredTree;
+    refreshResourcePaths();
+    pendingMachineState = restoredMachine;
+    if (machineSink.isReady() && pendingMachineState.getSize() > 0) {
+        bridge.resetTimeline();
+        if (machineSink.restoreState(pendingMachineState.getData(),
+                                     pendingMachineState.getSize()))
+            pendingMachineState.reset();
     }
 }
 

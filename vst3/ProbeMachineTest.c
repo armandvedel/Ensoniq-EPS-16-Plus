@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void run_for(uint64_t cycles) {
@@ -27,8 +28,9 @@ static int display_starts_with(const char *expected) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 4) {
-        fprintf(stderr, "usage: %s COMBINED_ROM KPC_ROM OS_DISK\n", argv[0]);
+    if (argc != 4 && argc != 5) {
+        fprintf(stderr, "usage: %s COMBINED_ROM KPC_ROM OS_DISK [SNAPSHOT]\n",
+                argv[0]);
         return 2;
     }
     char error[256];
@@ -109,6 +111,41 @@ int main(int argc, char **argv) {
     printf("queued_audio_frames=%zu last_audio_cycle=%llu\n",
            queued_audio_frames, (unsigned long long)previous_audio_cycle);
     if (!queued_audio_frames) return 1;
+
+    const size_t snapshot_size = eps16_probe_machine_state_size();
+    void *snapshot = malloc(snapshot_size);
+    if (!snapshot || !eps16_probe_machine_save_state(snapshot, snapshot_size))
+        return 1;
+    if (argc == 5) {
+        FILE *snapshot_file = fopen(argv[4], "wb");
+        if (!snapshot_file ||
+            fwrite(snapshot, 1, snapshot_size, snapshot_file) != snapshot_size ||
+            fclose(snapshot_file))
+            return 1;
+    }
+    const uint64_t saved_cycle = eps16_probe_machine_cycles();
+    const uint64_t saved_writes = eps16_probe_machine_sample_ram_write_bytes();
+    char saved_display[23];
+    eps16_probe_machine_display(saved_display);
+    run_for(5000000);
+    if (eps16_probe_machine_cycles() == saved_cycle) return 1;
+    char restore_error[256];
+    if (!eps16_probe_machine_load_state(snapshot, snapshot_size,
+                                        restore_error, sizeof(restore_error))) {
+        fprintf(stderr, "snapshot restore failed: %s\n", restore_error);
+        return 1;
+    }
+    free(snapshot);
+    if (eps16_probe_machine_cycles() != saved_cycle ||
+        eps16_probe_machine_sample_ram_write_bytes() != saved_writes)
+        return 1;
+    char restored_display[23];
+    eps16_probe_machine_display(restored_display);
+    if (memcmp(saved_display, restored_display, sizeof(saved_display))) return 1;
+    run_for(1000000);
+    if (eps16_probe_machine_illegal_instructions()) return 1;
+    printf("snapshot_size=%zu restored_cycle=%llu\n", snapshot_size,
+           (unsigned long long)saved_cycle);
     eps16_probe_machine_midi(0x80, 60, 0);
     run_for(1000000);
     return 0;

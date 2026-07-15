@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace eps16::vst3 {
 
@@ -40,10 +41,16 @@ public:
     [[nodiscard]] int cursorEnd() const {
         return displayCursorEnd.load(std::memory_order_relaxed);
     }
+    [[nodiscard]] std::uint32_t decimalMask() const {
+        return displayDecimalMask.load(std::memory_order_relaxed);
+    }
     [[nodiscard]] std::size_t illegalInstructions() const;
+    [[nodiscard]] std::vector<std::uint8_t> captureState() const;
+    bool restoreState(const void *data, std::size_t size);
 
 private:
     void publishDisplay();
+    void discardQueuedAudio();
 
     std::string rom;
     std::string kpc;
@@ -53,6 +60,7 @@ private:
     std::array<std::atomic<char>, 23> displayCharacters{};
     std::atomic<int> displayCursorStart{-1};
     std::atomic<int> displayCursorEnd{-1};
+    std::atomic<std::uint32_t> displayDecimalMask{};
     std::atomic<bool> ready{};
     std::uint64_t cycleBase{};
     BandlimitedResampler resampler;

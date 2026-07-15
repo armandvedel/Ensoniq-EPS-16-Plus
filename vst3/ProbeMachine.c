@@ -9,6 +9,8 @@
 #include "../native/rom_probe.c"
 #undef main
 
+#include "m68kcpu.h"
+
 #include <math.h>
 
 static int plugin_initialized;
@@ -26,6 +28,104 @@ static size_t plugin_audio_queue_read;
 static size_t plugin_audio_queue_write;
 static uint8_t plugin_panel_pair[2];
 static size_t plugin_panel_pair_count;
+
+#define PLUGIN_SNAPSHOT_FIELDS(X) \
+    X(low_ram) X(sample_ram) X(sample_ram_write_bytes) X(os_ram) \
+    X(es5505_writes) X(es5510) X(es5510_gpr_latch) \
+    X(es5510_instruction_latch) X(es5510_dil_latch) X(es5510_dol_latch) \
+    X(es5510_dadr_latch) X(es5510_ram_read) X(es5510_dram_reads) \
+    X(es5510_dram_writes) X(es5510_gpr_writes) X(es5510_instruction_writes) \
+    X(es5510_host_serial) X(es5510_host_serial_writes) \
+    X(es5510_host_upload_active) X(es5510_host_access_until) X(live_mode) \
+    X(deterministic_host_input) X(es5510_input_next_cycle) \
+    X(es5510_input_next_time_ns) X(es5510_input_last_poll_time_ns) \
+    X(es5510_input_last_poll_cycle) X(es5510_input_polls) \
+    X(es5510_input_valid) X(es5510_input_bypass) \
+    X(sample_record_input_valid_start) X(sample_record_write_start) \
+    X(function_code) X(duart_registers) X(panel_rx) X(panel_rx_read) \
+    X(panel_rx_write) X(panel_rx_count) X(panel_rx_consumed) X(panel_wire) \
+    X(panel_wire_read) X(panel_wire_write) X(panel_wire_count) \
+    X(panel_wire_tail_cycle) X(panel_tx) X(panel_tx_count) X(current_cycle) \
+    X(panel_display) X(panel_display_decimal_mask) X(panel_display_dirty) \
+    X(panel_display_last_change_cycle) X(panel_cursor) X(panel_cursor_start) \
+    X(panel_cursor_end) X(panel_cursor_active) X(panel_cursor_width_pending) \
+    X(panel_cursor_width_known) X(panel_noncell_parameter_pending) \
+    X(panel_last_tx) X(panel_pick_instrument_seen) X(panel_file_loaded_seen) \
+    X(disk_image) X(disk_loaded) X(disk_change_pending) X(fdc_track) \
+    X(fdc_physical_track) X(fdc_sector) X(fdc_data_register) \
+    X(fdc_last_command) X(fdc_step_direction) X(fdc_remaining) \
+    X(fdc_data_reads) X(duart_output) X(duart_tx_a_enabled) \
+    X(duart_tx_a_ready) X(duart_tx_a_ready_cycle) X(duart_tx_b_enabled) \
+    X(duart_tx_b_ready) X(duart_tx_b_ready_cycle) X(midi_tx) \
+    X(midi_tx_count) X(analog_values) X(analog_reads) \
+    X(duart_timer_pending) X(duart_timer_running) X(duart_timer_next_cycle) \
+    X(fdc_reads) X(dmac_registers) X(dmac_irq_channel) X(dmac_transfers) \
+    X(dmac_pcl_level) X(kpc) X(kpc_firmware_execution) \
+    X(kpc_firmware_failure_reported) X(kpc_physical_queue) \
+    X(kpc_physical_queue_read) X(kpc_physical_queue_write) \
+    X(kpc_physical_queue_count) X(kpc_physical_expected) \
+    X(kpc_physical_active) X(kpc_physical_saw_code) \
+    X(kpc_physical_next_cycle) X(display_trace_bytes) \
+    X(display_trace_byte_count) X(illegal_instructions) \
+    X(illegal_instruction_count) X(live_press_cycle) \
+    X(sampling_enter_pending) X(sampling_enter_release_cycle) \
+    X(sampling_recording_active) X(plugin_executed) \
+    X(plugin_audio_scheduled_cycle) X(plugin_audio_cycle_accumulator) \
+    X(plugin_timer_irqs) X(plugin_input_sample) X(plugin_input_valid) \
+    X(plugin_output_left) X(plugin_output_right) X(plugin_panel_pair) \
+    X(plugin_panel_pair_count)
+
+typedef struct {
+    uint8_t magic[8];
+    uint32_t version;
+    uint32_t header_size;
+    uint64_t total_size;
+    uint64_t checksum;
+    uint32_t m68k_context_size;
+    uint32_t reserved;
+    int64_t fdc_data_offset;
+} PluginSnapshotHeader;
+
+typedef struct {
+    uint8_t *current;
+    uint8_t *end;
+    int valid;
+} PluginSnapshotWriter;
+
+typedef struct {
+    const uint8_t *current;
+    const uint8_t *end;
+    int valid;
+} PluginSnapshotReader;
+
+static void snapshot_write(PluginSnapshotWriter *writer,
+                           const void *source, size_t size) {
+    if (!writer->valid || size > (size_t)(writer->end - writer->current)) {
+        writer->valid = 0;
+        return;
+    }
+    memcpy(writer->current, source, size);
+    writer->current += size;
+}
+
+static void snapshot_read(PluginSnapshotReader *reader,
+                          void *destination, size_t size) {
+    if (!reader->valid || size > (size_t)(reader->end - reader->current)) {
+        reader->valid = 0;
+        return;
+    }
+    memcpy(destination, reader->current, size);
+    reader->current += size;
+}
+
+static uint64_t snapshot_checksum(const uint8_t *data, size_t size) {
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (size_t index = 0; index < size; ++index) {
+        hash ^= data[index];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
 
 static void plugin_error(char *error, size_t error_size, const char *message) {
     if (error && error_size) snprintf(error, error_size, "%s", message);
@@ -247,6 +347,10 @@ void eps16_probe_machine_display(char display[23]) {
     display[22] = '\0';
 }
 
+uint32_t eps16_probe_machine_decimal_mask(void) {
+    return panel_display_decimal_mask & 0x3fffffU;
+}
+
 void eps16_probe_machine_cursor(int *start, int *end) {
     if (start) *start = panel_cursor_start;
     if (end) *end = panel_cursor_end;
@@ -266,6 +370,162 @@ uint64_t eps16_probe_machine_sample_ram_write_bytes(void) {
 
 uint64_t eps16_probe_machine_sampling_input_conversions(void) {
     return es5510_input_valid;
+}
+
+size_t eps16_probe_machine_state_size(void) {
+    if (!plugin_initialized) return 0;
+#define SNAPSHOT_FIELD_SIZE(name) + sizeof(name)
+    return sizeof(PluginSnapshotHeader) + sizeof(Es5505Core) +
+           sizeof(KpcDevice) + m68k_context_size()
+           PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_FIELD_SIZE);
+#undef SNAPSHOT_FIELD_SIZE
+}
+
+int eps16_probe_machine_save_state(void *data, size_t size) {
+    const size_t required = eps16_probe_machine_state_size();
+    if (!required || !data || size != required) return 0;
+    memset(data, 0, size);
+    PluginSnapshotHeader *header = (PluginSnapshotHeader *)data;
+    memcpy(header->magic, "EPS16ST\0", 8);
+    header->version = 1;
+    header->header_size = sizeof(*header);
+    header->total_size = size;
+    header->m68k_context_size = m68k_context_size();
+    header->fdc_data_offset = -1;
+    if (fdc_data) {
+        const uintptr_t pointer = (uintptr_t)fdc_data;
+        const uintptr_t beginning = (uintptr_t)disk_image;
+        const uintptr_t end = beginning + sizeof(disk_image);
+        if (pointer >= beginning && pointer <= end)
+            header->fdc_data_offset = (int64_t)(pointer - beginning);
+    }
+
+    PluginSnapshotWriter writer = {
+        (uint8_t *)data + sizeof(*header), (uint8_t *)data + size, 1
+    };
+#define SNAPSHOT_SAVE_FIELD(name) snapshot_write(&writer, &(name), sizeof(name));
+    PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_SAVE_FIELD)
+#undef SNAPSHOT_SAVE_FIELD
+
+    Es5505Core saved_es5505 = es5505;
+    saved_es5505.sample_reader = NULL;
+    saved_es5505.sample_context = NULL;
+    saved_es5505.port_reader = NULL;
+    saved_es5505.port_context = NULL;
+    snapshot_write(&writer, &saved_es5505, sizeof(saved_es5505));
+
+    KpcDevice saved_kpc_device = kpc_device;
+    memset(&saved_kpc_device.firmware, 0, sizeof(saved_kpc_device.firmware));
+    saved_kpc_device.cpu.memory_context = NULL;
+    saved_kpc_device.cpu.read8 = NULL;
+    saved_kpc_device.cpu.write8 = NULL;
+    snapshot_write(&writer, &saved_kpc_device, sizeof(saved_kpc_device));
+
+    m68ki_cpu_core saved_cpu;
+    m68k_get_context(&saved_cpu);
+    saved_cpu.cyc_instruction = NULL;
+    saved_cpu.cyc_exception = NULL;
+    saved_cpu.int_ack_callback = NULL;
+    saved_cpu.bkpt_ack_callback = NULL;
+    saved_cpu.reset_instr_callback = NULL;
+    saved_cpu.cmpild_instr_callback = NULL;
+    saved_cpu.rte_instr_callback = NULL;
+    saved_cpu.tas_instr_callback = NULL;
+    saved_cpu.illg_instr_callback = NULL;
+    saved_cpu.trap_instr_callback = NULL;
+    saved_cpu.pc_changed_callback = NULL;
+    saved_cpu.set_fc_callback = NULL;
+    saved_cpu.instr_hook_callback = NULL;
+    snapshot_write(&writer, &saved_cpu, sizeof(saved_cpu));
+    if (!writer.valid || writer.current != writer.end) return 0;
+    header->checksum = snapshot_checksum((const uint8_t *)data + sizeof(*header),
+                                         size - sizeof(*header));
+    return 1;
+}
+
+int eps16_probe_machine_load_state(const void *data, size_t size,
+                                   char *error, size_t error_size) {
+    if (!plugin_initialized) {
+        plugin_error(error, error_size, "machine must be initialized before restore");
+        return 0;
+    }
+    if (!data || size < sizeof(PluginSnapshotHeader)) {
+        plugin_error(error, error_size, "machine snapshot is truncated");
+        return 0;
+    }
+    PluginSnapshotHeader header;
+    memcpy(&header, data, sizeof(header));
+    const size_t expected = eps16_probe_machine_state_size();
+    if (memcmp(header.magic, "EPS16ST\0", 8) || header.version != 1 ||
+        header.header_size != sizeof(header) || header.total_size != size ||
+        size != expected || header.m68k_context_size != m68k_context_size()) {
+        plugin_error(error, error_size, "machine snapshot format is incompatible");
+        return 0;
+    }
+    const uint8_t *payload = (const uint8_t *)data + sizeof(header);
+    if (header.checksum != snapshot_checksum(payload, size - sizeof(header))) {
+        plugin_error(error, error_size, "machine snapshot checksum failed");
+        return 0;
+    }
+    if (header.fdc_data_offset < -1 ||
+        header.fdc_data_offset > (int64_t)sizeof(disk_image)) {
+        plugin_error(error, error_size, "machine snapshot has invalid disk position");
+        return 0;
+    }
+
+    const Es5505SampleReader sample_reader = es5505.sample_reader;
+    void *const sample_context = es5505.sample_context;
+    const Es5505PortReader port_reader = es5505.port_reader;
+    void *const port_context = es5505.port_context;
+    const KpcFirmware device_firmware = kpc_device.firmware;
+    void *const kpc_memory_context = kpc_device.cpu.memory_context;
+    const M68hc11Read8 kpc_read8 = kpc_device.cpu.read8;
+    const M68hc11Write8 kpc_write8 = kpc_device.cpu.write8;
+
+    PluginSnapshotReader reader = {payload, (const uint8_t *)data + size, 1};
+#define SNAPSHOT_LOAD_FIELD(name) snapshot_read(&reader, &(name), sizeof(name));
+    PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_LOAD_FIELD)
+#undef SNAPSHOT_LOAD_FIELD
+    snapshot_read(&reader, &es5505, sizeof(es5505));
+    snapshot_read(&reader, &kpc_device, sizeof(kpc_device));
+    if (!reader.valid ||
+        (size_t)(reader.end - reader.current) != header.m68k_context_size) {
+        plugin_error(error, error_size, "machine snapshot payload is invalid");
+        return 0;
+    }
+    m68ki_cpu_core current_cpu;
+    m68ki_cpu_core restored_cpu;
+    m68k_get_context(&current_cpu);
+    snapshot_read(&reader, &restored_cpu, sizeof(restored_cpu));
+    restored_cpu.cyc_instruction = current_cpu.cyc_instruction;
+    restored_cpu.cyc_exception = current_cpu.cyc_exception;
+    restored_cpu.int_ack_callback = current_cpu.int_ack_callback;
+    restored_cpu.bkpt_ack_callback = current_cpu.bkpt_ack_callback;
+    restored_cpu.reset_instr_callback = current_cpu.reset_instr_callback;
+    restored_cpu.cmpild_instr_callback = current_cpu.cmpild_instr_callback;
+    restored_cpu.rte_instr_callback = current_cpu.rte_instr_callback;
+    restored_cpu.tas_instr_callback = current_cpu.tas_instr_callback;
+    restored_cpu.illg_instr_callback = current_cpu.illg_instr_callback;
+    restored_cpu.trap_instr_callback = current_cpu.trap_instr_callback;
+    restored_cpu.pc_changed_callback = current_cpu.pc_changed_callback;
+    restored_cpu.set_fc_callback = current_cpu.set_fc_callback;
+    restored_cpu.instr_hook_callback = current_cpu.instr_hook_callback;
+    m68k_set_context(&restored_cpu);
+
+    es5505.sample_reader = sample_reader;
+    es5505.sample_context = sample_context;
+    es5505.port_reader = port_reader;
+    es5505.port_context = port_context;
+    kpc_device.firmware = device_firmware;
+    kpc_device.cpu.memory_context = kpc_memory_context;
+    kpc_device.cpu.read8 = kpc_read8;
+    kpc_device.cpu.write8 = kpc_write8;
+    fdc_data = header.fdc_data_offset >= 0
+                   ? disk_image + header.fdc_data_offset : NULL;
+    plugin_audio_queue_read = 0;
+    plugin_audio_queue_write = 0;
+    if (error && error_size) error[0] = '\0';
+    return reader.current == reader.end;
 }
 
 /* live_host replacements used by the included probe.  No host services,

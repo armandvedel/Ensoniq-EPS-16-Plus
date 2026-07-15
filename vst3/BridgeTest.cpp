@@ -101,5 +101,10 @@ int main() {
     }
     assert(partitionedBridge.cpuCycles() == bridge.cpuCycles());
     assert(partitionedSink.lastRunCycle == sink.lastRunCycle);
+    assert(partitionedBridge.resetTimeline());
+    partitionedBridge.process(inputLeft.data(), inputRight.data(),
+                              outputLeft.data(), outputRight.data(), 1,
+                              nullptr, 0);
+    assert(partitionedBridge.cpuCycles() == 208);
     return 0;
 }

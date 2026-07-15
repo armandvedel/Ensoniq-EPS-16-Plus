@@ -39,13 +39,21 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   STOP/CONTINUE and PLAY mappings are visible but disabled.
 - The VFD is blank until a real KPC/OS sink publishes it. No placeholder OS
   message is inserted into the display.
-- External selectors for combined ROM, KPC ROM and OS disk paths. The selected
-  paths are plug-in state; no copyrighted image is in the source or bundle.
+- ROM, KPC ROM and OS disk paths are discovered automatically from the
+  external `EPS_files` folder; file selectors are intentionally absent from
+  the compact rack GUI. No copyrighted image is in the source or bundle.
 - Automatic discovery in the `EPS_files` folder beside the installed `.vst3`
   bundle. The package contains only an empty folder and README; user-supplied
   ROM and disk images remain external.
 - VOLUME maps to analog channel 5. DATA ENTRY uses the documented GUI
   `0..1023` to raw ADC `0..715` mapping on channel 3.
+- VST state contains a checksummed full-machine snapshot: CPU and controller
+  state, low/OS/sample RAM, ES5505, ES5510, panel, DMA, DUART and mounted-disk
+  state. A project can therefore reopen with its instruments and samples
+  already resident. ROM and KPC firmware bytes are deliberately excluded and
+  still come from the user's external files.
+- The 22-cell VFD is left aligned like the rack display and renders the
+  decimal-point bitmask and original-OS cursor independently of the text.
 
 The current sink executes the authentic machine and is audible, but its state
 is still file-static inside the loaded VST module. It is therefore not yet

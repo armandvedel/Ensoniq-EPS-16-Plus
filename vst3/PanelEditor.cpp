@@ -18,28 +18,34 @@ void Eps16PanelEditor::VfdLabel::setCursorRange(int start, int end) {
     repaint();
 }
 
+void Eps16PanelEditor::VfdLabel::setDecimalMask(std::uint32_t mask) {
+    mask &= 0x3fffffU;
+    if (decimalMask == mask) return;
+    decimalMask = mask;
+    repaint();
+}
+
 void Eps16PanelEditor::VfdLabel::paint(juce::Graphics &graphics) {
     juce::Label::paint(graphics);
-    if (cursorStart < 0 || cursorEnd <= cursorStart) return;
 
     const auto textArea = getBorderSize().subtractedFrom(getLocalBounds())
                                          .toFloat();
     const auto font = getFont();
-    const float naturalWidth =
-        juce::GlyphArrangement::getStringWidth(font, getText());
-    if (naturalWidth <= 0.0f) return;
-    const float horizontalScale = juce::jmin(1.0f,
-                                              textArea.getWidth() / naturalWidth);
-    const float cellWidth =
-        juce::GlyphArrangement::getStringWidth(font, "M") * horizontalScale;
-    const float renderedWidth = naturalWidth * horizontalScale;
-    const float textLeft = textArea.getCentreX() - renderedWidth * 0.5f;
-    const float cursorLeft = textLeft + cellWidth * (float)cursorStart;
-    const float cursorWidth = cellWidth * (float)(cursorEnd - cursorStart);
-    const float cursorY = textArea.getCentreY() + font.getHeight() * 0.43f;
+    const float cellWidth = juce::GlyphArrangement::getStringWidth(font, "M");
+    const float textLeft = textArea.getX();
+    const float baselineY = textArea.getCentreY() + font.getHeight() * 0.34f;
 
     graphics.setColour(findColour(juce::Label::textColourId));
-    graphics.fillRect(cursorLeft, cursorY, cursorWidth, 2.0f);
+    for (int index = 0; index < 22; ++index) {
+        if (!(decimalMask & (UINT32_C(1) << index))) continue;
+        const float dotX = textLeft + cellWidth * ((float)index + 0.82f);
+        graphics.fillEllipse(dotX, baselineY - 2.0f, 3.0f, 3.0f);
+    }
+    if (cursorStart >= 0 && cursorEnd > cursorStart) {
+        const float cursorLeft = textLeft + cellWidth * (float)cursorStart;
+        const float cursorWidth = cellWidth * (float)(cursorEnd - cursorStart);
+        graphics.fillRect(cursorLeft, baselineY + 2.0f, cursorWidth, 2.0f);
+    }
 }
 
 Eps16PanelEditor::PanelButton::PanelButton(Eps16PlusProcessor &processorToUse,
@@ -82,12 +88,12 @@ void Eps16PanelEditor::PanelButton::mouseExit(const juce::MouseEvent &event) {
 
 Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     : AudioProcessorEditor(processorToUse), owner(processorToUse) {
-    setSize(1280, 650);
+    setSize(1280, 550);
     setResizable(true, true);
-    setResizeLimits(1100, 580, 1600, 850);
+    setResizeLimits(1100, 470, 1600, 700);
 
     vfd.setText(juce::String::repeatedString(" ", 22), juce::dontSendNotification);
-    vfd.setJustificationType(juce::Justification::centred);
+    vfd.setJustificationType(juce::Justification::centredLeft);
     vfd.setFont(juce::Font(juce::FontOptions("Menlo", 25.0f,
                                              juce::Font::plain)));
     vfd.setColour(juce::Label::backgroundColourId, juce::Colours::black);
@@ -156,22 +162,6 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
             static_cast<std::uint16_t>((gui * 715U) / 1023U));
     };
 
-    for (auto *row : {&romRow, &kpcRow, &diskRow}) {
-        row->path.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
-        row->path.setText(owner.getResourcePath(row->key),
-                          juce::dontSendNotification);
-        addAndMakeVisible(row->chooser);
-        addAndMakeVisible(row->path);
-    }
-    romRow.chooser.onClick = [this] {
-        chooseResource(romRow, "Select combined 128 KiB EPS ROM", "*.bin;*.rom");
-    };
-    kpcRow.chooser.onClick = [this] {
-        chooseResource(kpcRow, "Select external 32 KiB KPC ROM", "*.bin;*.rom");
-    };
-    diskRow.chooser.onClick = [this] {
-        chooseResource(diskRow, "Select external EPS OS disk", "*.img;*.hfe");
-    };
     /* setSize() runs resized() near the start of this constructor, before the
        dynamically-created panel buttons exist. Lay out once more after every
        child has been added so hosts that keep the initial size do not leave
@@ -189,37 +179,11 @@ Eps16PanelEditor::PanelButton &Eps16PanelEditor::addPanelButton(
     return reference;
 }
 
-void Eps16PanelEditor::chooseResource(ResourceRow &row, const juce::String &title,
-                                      const juce::String &pattern) {
-    const juce::File current(row.path.getText());
-    const auto initial = current.existsAsFile()
-                             ? current
-                             : Eps16PlusProcessor::defaultResourceDirectory();
-    row.fileChooser = std::make_unique<juce::FileChooser>(
-        title, initial, pattern);
-    auto *rowPointer = &row;
-    row.fileChooser->launchAsync(juce::FileBrowserComponent::openMode |
-                                     juce::FileBrowserComponent::canSelectFiles,
-                                 [this, rowPointer](const juce::FileChooser &chooser) {
-        const auto file = chooser.getResult();
-        if (file.existsAsFile()) {
-            const auto fullPath = file.getFullPathName();
-            owner.setResourcePath(rowPointer->key, fullPath);
-            rowPointer->path.setText(fullPath, juce::dontSendNotification);
-        }
-        rowPointer->fileChooser.reset();
-    });
-}
-
 void Eps16PanelEditor::timerCallback() {
     owner.refreshResourcePaths();
-    for (auto *row : {&romRow, &kpcRow, &diskRow}) {
-        const auto discovered = owner.getResourcePath(row->key);
-        if (row->path.getText() != discovered)
-            row->path.setText(discovered, juce::dontSendNotification);
-    }
     vfd.setText(owner.machineDisplay(), juce::dontSendNotification);
     vfd.setCursorRange(owner.machineCursorStart(), owner.machineCursorEnd());
+    vfd.setDecimalMask(owner.machineDecimalMask());
     status.setText("DAW-driven CPU cycles: " + juce::String(owner.cpuCycles()) +
                        " | " + owner.machineStatus() +
                        " | illegal instructions: " +
@@ -328,15 +292,12 @@ void Eps16PanelEditor::paint(juce::Graphics &graphics) {
                       dataEntry.getBottom() + 3, dataEntry.getWidth() + 36,
                       18, juce::Justification::centred);
 
-    graphics.setColour(juce::Colour(0xff76516f));
-    graphics.fillRect(180, romRow.chooser.getY() - 12,
-                      getWidth() - 230, 2);
 }
 
 void Eps16PanelEditor::resized() {
     if (pageButtons.front() == nullptr) return;
     const float scale = juce::jmin((float)getWidth() / 1280.0f,
-                                   (float)(getHeight() - 120) / 530.0f);
+                                   (float)(getHeight() - 20) / 530.0f);
     const int offsetX = (getWidth() - juce::roundToInt(1280.0f * scale)) / 2;
     auto rackRect = [scale, offsetX](int x, int y, int width, int height) {
         return juce::Rectangle<int>(
@@ -377,11 +338,4 @@ void Eps16PanelEditor::resized() {
     cancelButton->setBounds(rackRect(900, 335, 58, 32));
     enterButton->setBounds(rackRect(1020, 335, 58, 32));
 
-    int resourceY = getHeight() - 103;
-    const int margin = 18;
-    for (auto *row : {&romRow, &kpcRow, &diskRow}) {
-        row->chooser.setBounds(margin, resourceY, 105, 28);
-        row->path.setBounds(margin + 112, resourceY, getWidth() - 150, 28);
-        resourceY += 31;
-    }
 }

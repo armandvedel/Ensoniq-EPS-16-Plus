@@ -66,6 +66,7 @@ public:
     explicit EmulatorBridge(EmulatorSink &sinkToUse) : sink(sinkToUse) {}
 
     bool prepare(double sampleRate);
+    bool resetTimeline();
     bool enqueuePanelTransition(std::uint8_t rawMatrixCode, bool pressed);
     bool enqueueAnalog(unsigned int channel, std::uint16_t value);
     void process(const float *inputLeft, const float *inputRight,

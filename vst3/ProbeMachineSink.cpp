@@ -29,8 +29,7 @@ void ProbeMachineSink::prepare(double dawSampleRate) {
     if (eps16_probe_machine_initialize(rom.c_str(), kpc.c_str(), disk.c_str(),
                                        error, sizeof(error))) {
         cycleBase = eps16_probe_machine_cycles();
-        Eps16ProbeAudioFrame staleFrames[32];
-        while (eps16_probe_machine_drain_audio(staleFrames, 32) == 32) {}
+        discardQueuedAudio();
         {
             const std::lock_guard<std::mutex> lock(statusMutex);
             statusText = "authentic machine running";
@@ -44,6 +43,11 @@ void ProbeMachineSink::prepare(double dawSampleRate) {
         }
         ready.store(false, std::memory_order_release);
     }
+}
+
+void ProbeMachineSink::discardQueuedAudio() {
+    Eps16ProbeAudioFrame staleFrames[32];
+    while (eps16_probe_machine_drain_audio(staleFrames, 32) == 32) {}
 }
 
 void ProbeMachineSink::runUntil(std::uint64_t absoluteCpuCycle) {
@@ -95,11 +99,13 @@ void ProbeMachineSink::publishDisplay() {
     int cursorStart = -1;
     int cursorEnd = -1;
     eps16_probe_machine_display(text);
+    const auto decimalMask = eps16_probe_machine_decimal_mask();
     eps16_probe_machine_cursor(&cursorStart, &cursorEnd);
     for (std::size_t index = 0; index < 23; ++index)
         displayCharacters[index].store(text[index], std::memory_order_relaxed);
     displayCursorStart.store(cursorStart, std::memory_order_relaxed);
     displayCursorEnd.store(cursorEnd, std::memory_order_relaxed);
+    displayDecimalMask.store(decimalMask, std::memory_order_relaxed);
 }
 
 std::string ProbeMachineSink::display() const {
@@ -116,6 +122,33 @@ std::string ProbeMachineSink::status() const {
 
 std::size_t ProbeMachineSink::illegalInstructions() const {
     return isReady() ? eps16_probe_machine_illegal_instructions() : 0;
+}
+
+std::vector<std::uint8_t> ProbeMachineSink::captureState() const {
+    const auto size = isReady() ? eps16_probe_machine_state_size() : 0;
+    std::vector<std::uint8_t> result(size);
+    if (size && !eps16_probe_machine_save_state(result.data(), result.size()))
+        result.clear();
+    return result;
+}
+
+bool ProbeMachineSink::restoreState(const void *data, std::size_t size) {
+    if (!isReady() || !data || !size) return false;
+    char error[256]{};
+    if (!eps16_probe_machine_load_state(data, size, error, sizeof(error))) {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = error[0] ? error : "machine snapshot restore failed";
+        return false;
+    }
+    cycleBase = eps16_probe_machine_cycles();
+    discardQueuedAudio();
+    resampler.reset();
+    publishDisplay();
+    {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = "authentic machine restored from VST state";
+    }
+    return true;
 }
 
 } // namespace eps16::vst3

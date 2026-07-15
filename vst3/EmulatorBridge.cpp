@@ -31,6 +31,17 @@ bool EmulatorBridge::prepare(double sampleRate) {
     return true;
 }
 
+bool EmulatorBridge::resetTimeline() {
+    const auto sampleRate = clock.rate();
+    if (!sampleRate || !clock.prepare(static_cast<double>(sampleRate)))
+        return false;
+    controlRead.store(0, std::memory_order_relaxed);
+    controlWrite.store(0, std::memory_order_relaxed);
+    controlDrops.store(0, std::memory_order_relaxed);
+    publishedCycles.store(0, std::memory_order_relaxed);
+    return true;
+}
+
 bool EmulatorBridge::enqueue(ControlEvent event) {
     const auto write = controlWrite.load(std::memory_order_relaxed);
     const auto next = (write + 1) % controlQueueCapacity;
