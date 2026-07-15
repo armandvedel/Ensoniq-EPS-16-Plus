@@ -19,8 +19,9 @@ the verified machine is mechanically extracted from `rom_probe.c`.
 
 ## Implemented in milestone 1
 
-- Apple Silicon/macOS VST3 bundle with stereo input, stereo output and MIDI
-  input buses.
+- Apple Silicon/macOS VST3 instrument bundle with stereo sampling input,
+  stereo output and MIDI input buses. It is advertised to the DAW as an
+  instrument, not an audio effect.
 - No HTTP server, Web Audio, AudioQueue or CoreMIDI link in the plug-in.
 - Fixed-capacity message-thread-to-audio-thread queue for physical panel and
   analog transitions; the audio callback performs no queue allocation.
