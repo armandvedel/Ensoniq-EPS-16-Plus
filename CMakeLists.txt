@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(eps16_emulator_foundation LANGUAGES C)
+project(eps16_emulator_foundation VERSION 0.1.0 LANGUAGES C CXX)
+
+option(EPS16_BUILD_VST3 "Build the separated macOS VST3 prototype" OFF)
 
 set(MUSASHI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/work/deps/Musashi" CACHE PATH "Musashi source directory")
 if(NOT EXISTS "${MUSASHI_DIR}/m68kcpu.c")
@@ -54,6 +56,8 @@ add_executable(eps16_rom_probe
   native/rom_probe.c
   native/kpc_legacy.c
   native/kpc_firmware.c
+  native/kpc_device.c
+  native/m68hc11_core.c
   native/es5505_core.c
   native/es5510_core.c
   native/hfe_disk.c
@@ -85,7 +89,18 @@ target_include_directories(eps16_es5510_core_test PRIVATE native)
 add_executable(eps16_disk_input_test native/hfe_disk.c native/hfe_disk_test.c)
 target_include_directories(eps16_disk_input_test PRIVATE native)
 
+add_executable(eps16_m68hc11_core_test
+  native/m68hc11_core.c
+  native/m68hc11_core_test.c
+)
+target_include_directories(eps16_m68hc11_core_test PRIVATE native)
+
 enable_testing()
 add_test(NAME cpu_smoke COMMAND eps16_cpu_smoke)
 add_test(NAME es5505_core COMMAND eps16_es5505_core_test)
 add_test(NAME es5510_core COMMAND eps16_es5510_core_test)
+add_test(NAME m68hc11_core COMMAND eps16_m68hc11_core_test)
+
+if(EPS16_BUILD_VST3)
+  add_subdirectory(vst3)
+endif()

@@ -1,0 +1,63 @@
+#ifndef EPS16_VST3_PANEL_EDITOR_H
+#define EPS16_VST3_PANEL_EDITOR_H
+
+#include "PluginProcessor.h"
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include <memory>
+#include <vector>
+
+class Eps16PanelEditor final : public juce::AudioProcessorEditor,
+                               private juce::Timer {
+public:
+    explicit Eps16PanelEditor(Eps16PlusProcessor &);
+    ~Eps16PanelEditor() override = default;
+    void paint(juce::Graphics &) override;
+    void resized() override;
+
+private:
+    class PanelButton final : public juce::TextButton {
+    public:
+        PanelButton(Eps16PlusProcessor &, juce::String label,
+                    std::uint8_t rawCode, bool mappingKnown = true);
+        void mouseDown(const juce::MouseEvent &) override;
+        void mouseUp(const juce::MouseEvent &) override;
+        void mouseExit(const juce::MouseEvent &) override;
+
+    private:
+        void releaseIfNeeded();
+        Eps16PlusProcessor &processor;
+        const std::uint8_t code;
+        bool pressed{};
+    };
+
+    struct ResourceRow {
+        ResourceRow(juce::Identifier keyToUse, const juce::String &buttonText)
+            : key(std::move(keyToUse)), chooser(buttonText) {}
+        juce::Identifier key;
+        juce::TextButton chooser;
+        juce::Label path;
+        std::unique_ptr<juce::FileChooser> fileChooser;
+    };
+
+    PanelButton &addPanelButton(const juce::String &, std::uint8_t,
+                                bool known = true);
+    void chooseResource(ResourceRow &row, const juce::String &title,
+                        const juce::String &pattern);
+    void timerCallback() override;
+
+    Eps16PlusProcessor &owner;
+    juce::Label vfd;
+    juce::Label status;
+    juce::Slider masterVolume;
+    juce::Slider dataEntry;
+    std::vector<std::unique_ptr<PanelButton>> buttons;
+    ResourceRow romRow{Eps16PlusProcessor::romPathKey, "ROM..."};
+    ResourceRow kpcRow{Eps16PlusProcessor::kpcPathKey, "KPC..."};
+    ResourceRow diskRow{Eps16PlusProcessor::osDiskPathKey, "OS Disk..."};
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Eps16PanelEditor)
+};
+
+#endif

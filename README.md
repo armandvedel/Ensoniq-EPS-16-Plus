@@ -39,6 +39,11 @@ panel controls, four-byte click framing, and currently verified wire indices are
 user-supplied KPC 2.33 ROM are recorded without bundling it in
 [`docs/kpc-reference.md`](docs/kpc-reference.md).
 
+The separated first macOS VST3 host milestone, its exact limitations, build
+instructions and the next authentic-engine extraction gate are documented in
+[`docs/vst3-prototype.md`](docs/vst3-prototype.md). It is developed on the
+`vst3-prototype` branch; the `topsupergold` tag remains unchanged.
+
 ## Usage
 
 ```sh
