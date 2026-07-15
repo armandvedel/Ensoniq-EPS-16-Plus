@@ -229,6 +229,10 @@ void Eps16PanelEditor::timerCallback() {
 
 void Eps16PanelEditor::paint(juce::Graphics &graphics) {
     graphics.fillAll(panelColour);
+    /* setSize() may trigger paint/resized while the constructor is still
+       creating the dynamically-owned rack buttons. The final explicit
+       resized() call performs the complete layout once these pointers exist. */
+    if (pageButtons.front() == nullptr) return;
     graphics.setColour(rackLabelColour);
 
     graphics.setFont(14.0f);
@@ -330,6 +334,7 @@ void Eps16PanelEditor::paint(juce::Graphics &graphics) {
 }
 
 void Eps16PanelEditor::resized() {
+    if (pageButtons.front() == nullptr) return;
     const float scale = juce::jmin((float)getWidth() / 1280.0f,
                                    (float)(getHeight() - 120) / 530.0f);
     const int offsetX = (getWidth() - juce::roundToInt(1280.0f * scale)) / 2;

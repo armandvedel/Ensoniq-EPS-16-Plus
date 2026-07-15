@@ -95,3 +95,10 @@ add_test(NAME vst3_bridge COMMAND eps16_vst3_bridge_test)
 
 add_executable(eps16_probe_machine_test ProbeMachineTest.c)
 target_link_libraries(eps16_probe_machine_test PRIVATE eps16_probe_machine)
+
+add_executable(eps16_vst3_editor_smoke_test EditorSmokeTest.cpp)
+target_link_libraries(eps16_vst3_editor_smoke_test PRIVATE
+  Eps16Plus
+  juce::juce_gui_basics
+)
+add_test(NAME vst3_editor_smoke COMMAND eps16_vst3_editor_smoke_test)
