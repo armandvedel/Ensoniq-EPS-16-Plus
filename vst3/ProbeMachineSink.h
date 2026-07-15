@@ -33,6 +33,12 @@ public:
     }
     [[nodiscard]] std::string status() const;
     [[nodiscard]] std::string display() const;
+    [[nodiscard]] int cursorStart() const {
+        return displayCursorStart.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] int cursorEnd() const {
+        return displayCursorEnd.load(std::memory_order_relaxed);
+    }
     [[nodiscard]] std::size_t illegalInstructions() const;
 
 private:
@@ -44,6 +50,8 @@ private:
     mutable std::mutex statusMutex;
     std::string statusText{"waiting for ROM, KPC ROM and OS disk"};
     std::array<std::atomic<char>, 23> displayCharacters{};
+    std::atomic<int> displayCursorStart{-1};
+    std::atomic<int> displayCursorEnd{-1};
     std::atomic<bool> ready{};
     std::uint64_t cycleBase{};
 };

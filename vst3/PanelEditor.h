@@ -17,6 +17,16 @@ public:
     void resized() override;
 
 private:
+    class VfdLabel final : public juce::Label {
+    public:
+        void setCursorRange(int start, int end);
+        void paint(juce::Graphics &) override;
+
+    private:
+        int cursorStart{-1};
+        int cursorEnd{-1};
+    };
+
     class PanelButton final : public juce::TextButton {
     public:
         PanelButton(Eps16PlusProcessor &, juce::String label,
@@ -48,7 +58,7 @@ private:
     void timerCallback() override;
 
     Eps16PlusProcessor &owner;
-    juce::Label vfd;
+    VfdLabel vfd;
     juce::Label status;
     juce::Slider masterVolume;
     juce::Slider dataEntry;

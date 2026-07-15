@@ -73,9 +73,14 @@ void ProbeMachineSink::stereoOutput(float &left, float &right, std::uint64_t) {
 
 void ProbeMachineSink::publishDisplay() {
     char text[23];
+    int cursorStart = -1;
+    int cursorEnd = -1;
     eps16_probe_machine_display(text);
+    eps16_probe_machine_cursor(&cursorStart, &cursorEnd);
     for (std::size_t index = 0; index < 23; ++index)
         displayCharacters[index].store(text[index], std::memory_order_relaxed);
+    displayCursorStart.store(cursorStart, std::memory_order_relaxed);
+    displayCursorEnd.store(cursorEnd, std::memory_order_relaxed);
 }
 
 std::string ProbeMachineSink::display() const {

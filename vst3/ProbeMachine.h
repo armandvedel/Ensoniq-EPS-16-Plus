@@ -19,6 +19,7 @@ void eps16_probe_machine_analog(unsigned int channel, uint16_t value);
 void eps16_probe_machine_sampling_input(float left, float right);
 void eps16_probe_machine_stereo_output(float *left, float *right);
 void eps16_probe_machine_display(char display[23]);
+void eps16_probe_machine_cursor(int *start, int *end);
 uint64_t eps16_probe_machine_cycles(void);
 size_t eps16_probe_machine_illegal_instructions(void);
 uint64_t eps16_probe_machine_sample_ram_write_bytes(void);

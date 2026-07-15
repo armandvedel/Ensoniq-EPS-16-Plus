@@ -48,6 +48,8 @@ public:
     bool machineReady() const { return machineSink.isReady(); }
     juce::String machineStatus() const { return machineSink.status(); }
     juce::String machineDisplay() const { return machineSink.display(); }
+    int machineCursorStart() const { return machineSink.cursorStart(); }
+    int machineCursorEnd() const { return machineSink.cursorEnd(); }
     std::size_t illegalInstructions() const {
         return machineSink.illegalInstructions();
     }

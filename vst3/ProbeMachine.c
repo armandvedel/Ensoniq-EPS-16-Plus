@@ -215,6 +215,11 @@ void eps16_probe_machine_display(char display[23]) {
     display[22] = '\0';
 }
 
+void eps16_probe_machine_cursor(int *start, int *end) {
+    if (start) *start = panel_cursor_start;
+    if (end) *end = panel_cursor_end;
+}
+
 uint64_t eps16_probe_machine_cycles(void) {
     return plugin_executed;
 }

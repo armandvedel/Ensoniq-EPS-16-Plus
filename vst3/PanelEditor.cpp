@@ -8,6 +8,39 @@ const juce::Colour buttonColour{0xffd7d1c4};
 const juce::Colour displayColour{0xfff2d24b};
 }
 
+void Eps16PanelEditor::VfdLabel::setCursorRange(int start, int end) {
+    start = juce::jlimit(-1, 22, start);
+    end = juce::jlimit(-1, 22, end);
+    if (cursorStart == start && cursorEnd == end) return;
+    cursorStart = start;
+    cursorEnd = end;
+    repaint();
+}
+
+void Eps16PanelEditor::VfdLabel::paint(juce::Graphics &graphics) {
+    juce::Label::paint(graphics);
+    if (cursorStart < 0 || cursorEnd <= cursorStart) return;
+
+    const auto textArea = getBorderSize().subtractedFrom(getLocalBounds())
+                                         .toFloat();
+    const auto font = getFont();
+    const float naturalWidth =
+        juce::GlyphArrangement::getStringWidth(font, getText());
+    if (naturalWidth <= 0.0f) return;
+    const float horizontalScale = juce::jmin(1.0f,
+                                              textArea.getWidth() / naturalWidth);
+    const float cellWidth =
+        juce::GlyphArrangement::getStringWidth(font, "M") * horizontalScale;
+    const float renderedWidth = naturalWidth * horizontalScale;
+    const float textLeft = textArea.getCentreX() - renderedWidth * 0.5f;
+    const float cursorLeft = textLeft + cellWidth * (float)cursorStart;
+    const float cursorWidth = cellWidth * (float)(cursorEnd - cursorStart);
+    const float cursorY = textArea.getCentreY() + font.getHeight() * 0.43f;
+
+    graphics.setColour(findColour(juce::Label::textColourId));
+    graphics.fillRect(cursorLeft, cursorY, cursorWidth, 2.0f);
+}
+
 Eps16PanelEditor::PanelButton::PanelButton(Eps16PlusProcessor &processorToUse,
                                            juce::String label,
                                            std::uint8_t rawCode,
@@ -165,6 +198,7 @@ void Eps16PanelEditor::timerCallback() {
             row->path.setText(discovered, juce::dontSendNotification);
     }
     vfd.setText(owner.machineDisplay(), juce::dontSendNotification);
+    vfd.setCursorRange(owner.machineCursorStart(), owner.machineCursorEnd());
     status.setText("DAW-driven CPU cycles: " + juce::String(owner.cpuCycles()) +
                        " | " + owner.machineStatus() +
                        " | illegal instructions: " +
