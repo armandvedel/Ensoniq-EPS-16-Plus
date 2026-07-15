@@ -118,6 +118,11 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     diskRow.chooser.onClick = [this] {
         chooseResource(diskRow, "Select external EPS OS disk", "*.img;*.hfe");
     };
+    /* setSize() runs resized() near the start of this constructor, before the
+       dynamically-created panel buttons exist. Lay out once more after every
+       child has been added so hosts that keep the initial size do not leave
+       the entire button matrix at its default zero bounds. */
+    resized();
     startTimerHz(4);
 }
 
