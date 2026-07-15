@@ -58,5 +58,7 @@ void es5505_core_render_buses(Es5505Core *core,
                               size_t frames);
 void es5505_core_render(Es5505Core *core, int32_t *left, int32_t *right, size_t frames);
 int es5505_core_irq_pending(const Es5505Core *core);
+uint32_t es5505_core_output_divider(const Es5505Core *core);
+uint32_t es5505_core_output_rate(const Es5505Core *core, uint32_t clock_rate);
 
 #endif

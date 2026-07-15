@@ -11,8 +11,6 @@
 
 #include <math.h>
 
-enum { PLUGIN_AUDIO_RATE = CPU_CLOCK_RATE / (16 * 21) };
-
 static int plugin_initialized;
 static uint64_t plugin_executed;
 static uint64_t plugin_audio_scheduled_cycle;
@@ -30,9 +28,10 @@ static void plugin_error(char *error, size_t error_size, const char *message) {
 }
 
 static void plugin_render_audio(uint64_t elapsed_cycles) {
-    plugin_audio_cycle_accumulator += elapsed_cycles * PLUGIN_AUDIO_RATE;
-    uint64_t frames_due = plugin_audio_cycle_accumulator / CPU_CLOCK_RATE;
-    plugin_audio_cycle_accumulator %= CPU_CLOCK_RATE;
+    const uint32_t output_divider = es5505_core_output_divider(&es5505);
+    plugin_audio_cycle_accumulator += elapsed_cycles;
+    uint64_t frames_due = plugin_audio_cycle_accumulator / output_divider;
+    plugin_audio_cycle_accumulator %= output_divider;
     while (frames_due) {
         int32_t buses[ES5505_STEREO_BUSES * 2][64];
         int32_t *bus_outputs[ES5505_STEREO_BUSES * 2];

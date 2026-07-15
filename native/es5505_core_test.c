@@ -27,6 +27,15 @@ int main(void) {
     assert(es5505_core_read(&core, 13) == 31);
     assert(es5505_core_read(&core, 14) == 0x80);
     assert((es5505_core_read(&core, 0) & 3) == 3);
+    es5505_core_write(&core, 13, 7);
+    assert(es5505_core_output_divider(&core) == 128);
+    assert(es5505_core_output_rate(&core, 10000000) == 78125);
+    es5505_core_write(&core, 13, 13);
+    assert(es5505_core_output_divider(&core) == 224);
+    assert(es5505_core_output_rate(&core, 10000000) == 44642);
+    es5505_core_write(&core, 13, 20);
+    assert(es5505_core_output_divider(&core) == 336);
+    assert(es5505_core_output_rate(&core, 10000000) == 29761);
     for (unsigned int value = 1; value < 256; ++value)
         assert(core.volume_table[value] >= core.volume_table[value - 1]);
 

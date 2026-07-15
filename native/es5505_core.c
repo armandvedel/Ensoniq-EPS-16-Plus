@@ -141,6 +141,14 @@ int es5505_core_irq_pending(const Es5505Core *core) {
     return !(core->irq_vector & 0x80);
 }
 
+uint32_t es5505_core_output_divider(const Es5505Core *core) {
+    return 16U * ((uint32_t)core->active_voice + 1U);
+}
+
+uint32_t es5505_core_output_rate(const Es5505Core *core, uint32_t clock_rate) {
+    return clock_rate / es5505_core_output_divider(core);
+}
+
 void es5505_core_write(Es5505Core *core, unsigned int reg, uint16_t value) {
     Es5505Voice *voice = &core->voices[core->page & 31];
     reg &= 15;
