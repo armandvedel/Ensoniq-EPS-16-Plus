@@ -60,6 +60,7 @@ add_custom_target(eps16_vst3_package
   COMMAND "${CMAKE_COMMAND}"
           "-DSOURCE_BUNDLE=$<TARGET_BUNDLE_DIR:Eps16Plus_VST3>"
           "-DPACKAGE_DIR=${CMAKE_BINARY_DIR}/vst3-package"
+          "-DRESOURCE_README=${CMAKE_CURRENT_SOURCE_DIR}/ResourceFolder-README.txt"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/PackageMac.cmake"
   DEPENDS Eps16Plus_VST3
   VERBATIM

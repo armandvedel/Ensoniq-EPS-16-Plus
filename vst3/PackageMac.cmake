@@ -7,6 +7,7 @@ endif()
 
 set(STAGE "${PACKAGE_DIR}/EPS-16 Plus Prototype.stage")
 set(FINAL "${PACKAGE_DIR}/EPS-16 Plus Prototype.vst3")
+set(RESOURCES "${PACKAGE_DIR}/EPS_files")
 set(ARCHIVE "${PACKAGE_DIR}/EPS-16-Plus-Prototype-arm64.zip")
 file(REMOVE_RECURSE "${PACKAGE_DIR}")
 file(MAKE_DIRECTORY "${PACKAGE_DIR}")
@@ -27,7 +28,17 @@ run_checked(/usr/bin/xattr -cr "${STAGE}")
 run_checked(/usr/bin/codesign --force --deep --sign - "${STAGE}")
 run_checked(/usr/bin/codesign --verify --deep --strict --verbose=2 "${STAGE}")
 file(RENAME "${STAGE}" "${FINAL}")
-run_checked(/usr/bin/ditto -c -k --keepParent --norsrc --noextattr --noqtn
-            --noacl "${FINAL}" "${ARCHIVE}")
+file(MAKE_DIRECTORY "${RESOURCES}")
+configure_file("${RESOURCE_README}" "${RESOURCES}/README.txt" COPYONLY)
+execute_process(
+  COMMAND /usr/bin/zip -qry -X "${ARCHIVE}"
+          "EPS-16 Plus Prototype.vst3" "EPS_files"
+  WORKING_DIRECTORY "${PACKAGE_DIR}"
+  RESULT_VARIABLE ZIP_RESULT
+)
+if(NOT ZIP_RESULT EQUAL 0)
+  message(FATAL_ERROR "zip packaging failed (${ZIP_RESULT})")
+endif()
 file(REMOVE_RECURSE "${FINAL}")
+file(REMOVE_RECURSE "${RESOURCES}")
 message(STATUS "Verified package: ${ARCHIVE}")

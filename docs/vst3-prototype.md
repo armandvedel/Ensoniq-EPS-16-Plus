@@ -37,6 +37,9 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   message is inserted into the display.
 - External selectors for combined ROM, KPC ROM and OS disk paths. The selected
   paths are plug-in state; no copyrighted image is in the source or bundle.
+- Automatic discovery in the `EPS_files` folder beside the installed `.vst3`
+  bundle. The package contains only an empty folder and README; user-supplied
+  ROM and disk images remain external.
 - VOLUME maps to analog channel 5. DATA ENTRY uses the documented GUI
   `0..1023` to raw ADC `0..715` mapping on channel 3.
 
@@ -78,7 +81,8 @@ The raw bundle is written below
 copies it without Finder/resource-fork metadata, ad-hoc signs and strictly
 verifies it, then writes
 `work/vst3-build/vst3-package/EPS-16-Plus-Prototype-arm64.zip`. The archive
-contains no ROM, KPC ROM or OS disk.
+contains the plug-in plus an `EPS_files` sibling folder with a README, but no
+ROM, KPC ROM or OS disk.
 
 ## Next milestone: authentic engine extraction
 

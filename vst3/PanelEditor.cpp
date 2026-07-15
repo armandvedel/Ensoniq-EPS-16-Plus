@@ -137,8 +137,12 @@ Eps16PanelEditor::PanelButton &Eps16PanelEditor::addPanelButton(
 
 void Eps16PanelEditor::chooseResource(ResourceRow &row, const juce::String &title,
                                       const juce::String &pattern) {
+    const juce::File current(row.path.getText());
+    const auto initial = current.existsAsFile()
+                             ? current
+                             : Eps16PlusProcessor::defaultResourceDirectory();
     row.fileChooser = std::make_unique<juce::FileChooser>(
-        title, juce::File(row.path.getText()), pattern);
+        title, initial, pattern);
     auto *rowPointer = &row;
     row.fileChooser->launchAsync(juce::FileBrowserComponent::openMode |
                                      juce::FileBrowserComponent::canSelectFiles,
@@ -154,6 +158,12 @@ void Eps16PanelEditor::chooseResource(ResourceRow &row, const juce::String &titl
 }
 
 void Eps16PanelEditor::timerCallback() {
+    owner.refreshResourcePaths();
+    for (auto *row : {&romRow, &kpcRow, &diskRow}) {
+        const auto discovered = owner.getResourcePath(row->key);
+        if (row->path.getText() != discovered)
+            row->path.setText(discovered, juce::dontSendNotification);
+    }
     status.setText("VST3 adapter active | DAW-driven CPU cycles: " +
                        juce::String(owner.cpuCycles()) +
                        " | emulator core extraction pending",

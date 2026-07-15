@@ -41,6 +41,8 @@ public:
     }
     void setResourcePath(const juce::Identifier &key, const juce::String &path);
     juce::String getResourcePath(const juce::Identifier &key) const;
+    void refreshResourcePaths();
+    static juce::File defaultResourceDirectory();
     std::uint64_t cpuCycles() const { return bridge.cpuCycles(); }
 
     static const juce::Identifier romPathKey;
