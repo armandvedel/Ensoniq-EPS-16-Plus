@@ -152,13 +152,7 @@ Eps16PanelEditor::PanelButton::PanelButton(Eps16PlusProcessor &processorToUse,
 
 void Eps16PanelEditor::PanelButton::mouseDown(const juce::MouseEvent &event) {
     if (isEnabled() && !pressed) {
-        /* Transitional KPC scanner compatibility: the rack's INSTRUMENT page
-           key commits on the click/release edge.  The current synchronous
-           matrix adapter otherwise emits an extra preview edge which the OS
-           correctly returns to LOAD.  Keep this isolated until the raw KPC
-           electrical scanner replaces the transition adapter. */
-        pressed = code == 0x1a ||
-                  processor.enqueuePanelTransition(code, true);
+        pressed = processor.enqueuePanelTransition(code, true);
     }
     TextButton::mouseDown(event);
 }

@@ -35,7 +35,6 @@ uint64_t eps16_probe_machine_cycles(void);
 size_t eps16_probe_machine_illegal_instructions(void);
 uint64_t eps16_probe_machine_sample_ram_write_bytes(void);
 uint64_t eps16_probe_machine_sampling_input_conversions(void);
-uint64_t eps16_probe_machine_midi_input_bytes(void);
 size_t eps16_probe_machine_state_size(void);
 int eps16_probe_machine_save_state(void *data, size_t size);
 int eps16_probe_machine_load_state(const void *data, size_t size,
