@@ -1,13 +1,38 @@
 #include "ProbeMachine.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 /* Milestone bridge: compile the verified probe unchanged into a private VST
    translation unit, rename its CLI entry point, and expose only a DAW-clocked
    interface below.  This keeps live_host.c (HTTP, AudioQueue and CoreMIDI)
    out of the plug-in while the static probe state is made instance-owned in
    the next extraction step. */
+static char plugin_published_display[23] = "                      ";
+static uint32_t plugin_published_decimal_mask;
+static int plugin_published_cursor_start = -1;
+static int plugin_published_cursor_end = -1;
+
+static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
+                                   int cursor_start, int cursor_end) {
+    for (size_t index = 0; index < 23; ++index)
+        plugin_published_display[index] = display[index];
+    plugin_published_decimal_mask = decimal_mask;
+    plugin_published_cursor_start = cursor_start;
+    plugin_published_cursor_end = cursor_end;
+    if (getenv("EPS16_TRACE_PLUGIN_DISPLAY"))
+        fprintf(stderr, "plugin_display text=|%s| decimal=%06x cursor=%d-%d\n",
+                plugin_published_display,
+                plugin_published_decimal_mask & 0x3fffffU,
+                plugin_published_cursor_start, plugin_published_cursor_end);
+}
+
+#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
+    plugin_capture_display((display), (decimal_mask), (cursor_start), (cursor_end))
 #define main eps16_probe_cli_main
 #include "../native/rom_probe.c"
 #undef main
+#undef EPS16_PANEL_DISPLAY_PUBLISHED
 
 #include "m68kcpu.h"
 
@@ -78,6 +103,13 @@ static size_t plugin_panel_pair_count;
 #define PLUGIN_SNAPSHOT_V2_FIELDS(X) \
     X(panel_indicator_on) X(panel_indicator_flash) \
     X(panel_indicator_command_pending)
+
+#define PLUGIN_SNAPSHOT_V3_FIELDS(X) \
+    X(plugin_published_display) X(plugin_published_decimal_mask) \
+    X(plugin_published_cursor_start) X(plugin_published_cursor_end) \
+    X(midi_rx) X(midi_rx_read) X(midi_rx_write) X(midi_rx_count) \
+    X(midi_rx_consumed) X(midi_wire) X(midi_wire_read) X(midi_wire_write) \
+    X(midi_wire_count) X(midi_wire_tail_cycle) X(duart_rx_a_enabled)
 
 typedef struct {
     uint8_t magic[8];
@@ -221,6 +253,16 @@ int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
     kpc_device_set_capture_clock(&kpc_device, 2, 40000);
     deterministic_host_input = 1;
     live_mode = 0;
+    memset(plugin_published_display, ' ', 22);
+    plugin_published_display[22] = '\0';
+    plugin_published_decimal_mask = 0;
+    plugin_published_cursor_start = -1;
+    plugin_published_cursor_end = -1;
+    midi_rx_read = midi_rx_write = midi_rx_count = 0;
+    midi_rx_consumed = 0;
+    midi_wire_read = midi_wire_write = midi_wire_count = 0;
+    midi_wire_tail_cycle = 0;
+    duart_rx_a_enabled = 0;
 
     m68k_init();
     es5505_core_init(&es5505, es5505_sample_read, NULL);
@@ -255,6 +297,9 @@ void eps16_probe_machine_run_until(uint64_t target_cycle) {
         if (panel_wire_count && panel_rx_count < PANEL_RX_SIZE &&
             panel_wire[panel_wire_read].cycle < next_cycle)
             next_cycle = panel_wire[panel_wire_read].cycle;
+        if (midi_wire_count && midi_rx_count < MIDI_RX_SIZE &&
+            midi_wire[midi_wire_read].cycle < next_cycle)
+            next_cycle = midi_wire[midi_wire_read].cycle;
         if (!duart_tx_a_ready && duart_tx_a_ready_cycle < next_cycle)
             next_cycle = duart_tx_a_ready_cycle;
         if (!duart_tx_b_ready && duart_tx_b_ready_cycle < next_cycle)
@@ -295,6 +340,12 @@ void eps16_probe_machine_run_until(uint64_t target_cycle) {
             ++es5505_irqs;
         }
     }
+    if (panel_display_dirty &&
+        current_cycle - panel_display_last_change_cycle >= 100000) {
+        plugin_capture_display(panel_display, panel_display_decimal_mask,
+                               panel_cursor_start, panel_cursor_end);
+        panel_display_dirty = 0;
+    }
 }
 
 size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
@@ -312,10 +363,28 @@ size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
 void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2) {
     if (!plugin_initialized) return;
     const unsigned int kind = status & 0xf0;
-    if (kind == 0x90 && data2)
+    if (kind < 0x80 || kind > 0xe0) return;
+    /* Transitional rack compatibility: DUART-A now carries all performance
+       controllers, but the current OS receive integration does not yet start
+       voices for external note messages.  Preserve the verified KPC-playing
+       path for notes until that receiver path is completed. */
+    if (kind == 0x90 && data2) {
         live_note(data1, data2, 1);
-    else if (kind == 0x80 || (kind == 0x90 && !data2))
+        return;
+    }
+    if (kind == 0x80 || (kind == 0x90 && !data2)) {
         live_note(data1, data2, 0);
+        return;
+    }
+    if (getenv("EPS16_TRACE_MIDI_INPUT"))
+        fprintf(stderr,
+                "midi_schedule status=%02x data=%02x/%02x cycle=%llu imr=%02x enabled=%d\n",
+                status, data1, data2, (unsigned long long)plugin_executed,
+                duart_registers[5], duart_rx_a_enabled);
+    midi_schedule_at(status, plugin_executed);
+    midi_schedule_at(data1 & 0x7f, plugin_executed);
+    if (kind != 0xc0 && kind != 0xd0)
+        midi_schedule_at(data2 & 0x7f, plugin_executed);
 }
 
 void eps16_probe_machine_panel_byte(uint8_t value) {
@@ -347,12 +416,11 @@ void eps16_probe_machine_stereo_output(float *left, float *right) {
 
 void eps16_probe_machine_display(char display[23]) {
     if (!display) return;
-    memcpy(display, panel_display, 22);
-    display[22] = '\0';
+    memcpy(display, plugin_published_display, 23);
 }
 
 uint32_t eps16_probe_machine_decimal_mask(void) {
-    return panel_display_decimal_mask & 0x3fffffU;
+    return plugin_published_decimal_mask & 0x3fffffU;
 }
 
 uint16_t eps16_probe_machine_indicator_on(unsigned int bank) {
@@ -364,6 +432,8 @@ uint16_t eps16_probe_machine_indicator_flash(unsigned int bank) {
 }
 
 void eps16_probe_machine_cursor(int *start, int *end) {
+    /* Cursor commands are incremental VFD state and can follow the completed
+       text frame without another text publication. */
     if (start) *start = panel_cursor_start;
     if (end) *end = panel_cursor_end;
 }
@@ -384,13 +454,18 @@ uint64_t eps16_probe_machine_sampling_input_conversions(void) {
     return es5510_input_valid;
 }
 
+uint64_t eps16_probe_machine_midi_input_bytes(void) {
+    return midi_rx_consumed;
+}
+
 size_t eps16_probe_machine_state_size(void) {
     if (!plugin_initialized) return 0;
 #define SNAPSHOT_FIELD_SIZE(name) + sizeof(name)
     return sizeof(PluginSnapshotHeader) + sizeof(Es5505Core) +
            sizeof(KpcDevice) + m68k_context_size()
            PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_FIELD_SIZE)
-           PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_FIELD_SIZE);
+           PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_FIELD_SIZE)
+           PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_FIELD_SIZE);
 #undef SNAPSHOT_FIELD_SIZE
 }
 
@@ -400,7 +475,7 @@ int eps16_probe_machine_save_state(void *data, size_t size) {
     memset(data, 0, size);
     PluginSnapshotHeader *header = (PluginSnapshotHeader *)data;
     memcpy(header->magic, "EPS16ST\0", 8);
-    header->version = 2;
+    header->version = 3;
     header->header_size = sizeof(*header);
     header->total_size = size;
     header->m68k_context_size = m68k_context_size();
@@ -419,6 +494,7 @@ int eps16_probe_machine_save_state(void *data, size_t size) {
 #define SNAPSHOT_SAVE_FIELD(name) snapshot_write(&writer, &(name), sizeof(name));
     PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_SAVE_FIELD)
     PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_SAVE_FIELD)
+    PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_SAVE_FIELD)
 #undef SNAPSHOT_SAVE_FIELD
 
     Es5505Core saved_es5505 = es5505;
@@ -469,14 +545,19 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     }
     PluginSnapshotHeader header;
     memcpy(&header, data, sizeof(header));
-    const size_t expected_v2 = eps16_probe_machine_state_size();
+    const size_t expected_v3 = eps16_probe_machine_state_size();
+#define SNAPSHOT_V3_FIELD_SIZE(name) - sizeof(name)
+    const size_t expected_v2 = expected_v3
+        PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_V3_FIELD_SIZE);
+#undef SNAPSHOT_V3_FIELD_SIZE
 #define SNAPSHOT_V2_FIELD_SIZE(name) - sizeof(name)
     const size_t expected_v1 = expected_v2
         PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_V2_FIELD_SIZE);
 #undef SNAPSHOT_V2_FIELD_SIZE
-    const size_t expected = header.version == 1 ? expected_v1 : expected_v2;
+    const size_t expected = header.version == 1 ? expected_v1
+                          : header.version == 2 ? expected_v2 : expected_v3;
     if (memcmp(header.magic, "EPS16ST\0", 8) ||
-        (header.version != 1 && header.version != 2) ||
+        (header.version != 1 && header.version != 2 && header.version != 3) ||
         header.header_size != sizeof(header) || header.total_size != size ||
         size != expected || header.m68k_context_size != m68k_context_size()) {
         plugin_error(error, error_size, "machine snapshot format is incompatible");
@@ -511,6 +592,19 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
         memset(panel_indicator_on, 0, sizeof(panel_indicator_on));
         memset(panel_indicator_flash, 0, sizeof(panel_indicator_flash));
         panel_indicator_command_pending = 0;
+    }
+    if (header.version >= 3) {
+        PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_LOAD_FIELD)
+    } else {
+        memcpy(plugin_published_display, panel_display, 23);
+        plugin_published_decimal_mask = panel_display_decimal_mask;
+        plugin_published_cursor_start = panel_cursor_start;
+        plugin_published_cursor_end = panel_cursor_end;
+        midi_rx_read = midi_rx_write = midi_rx_count = 0;
+        midi_rx_consumed = 0;
+        midi_wire_read = midi_wire_write = midi_wire_count = 0;
+        midi_wire_tail_cycle = 0;
+        duart_rx_a_enabled = 1;
     }
 #undef SNAPSHOT_LOAD_FIELD
     snapshot_read(&reader, &es5505, sizeof(es5505));

@@ -110,8 +110,8 @@ int main(int argc, char **argv) {
     int cursor_end = -1;
     eps16_probe_machine_cursor(&cursor_start, &cursor_end);
     printf("cursor=%d..%d\n", cursor_start, cursor_end);
-    if (cursor_start < 0 || cursor_end <= cursor_start || cursor_end > 22)
-        return 1;
+    if (cursor_start >= 0 &&
+        (cursor_end <= cursor_start || cursor_end > 22)) return 1;
     printf("playback_peak=%f\n", playback_peak);
     if (playback_peak < 0.00001f) return 1;
     Eps16ProbeAudioFrame queued[64];

@@ -205,6 +205,19 @@ static void es5510_write_register(uint8_t index, uint32_t value) {
 }
 static unsigned int function_code;
 static uint8_t duart_registers[16];
+enum { MIDI_RX_SIZE = 256, MIDI_WIRE_SIZE = 256 };
+static uint8_t midi_rx[MIDI_RX_SIZE];
+static size_t midi_rx_read;
+static size_t midi_rx_write;
+static size_t midi_rx_count;
+static uint64_t midi_rx_consumed;
+typedef struct { uint64_t cycle; uint8_t value; } MidiWireByte;
+static MidiWireByte midi_wire[MIDI_WIRE_SIZE];
+static size_t midi_wire_read;
+static size_t midi_wire_write;
+static size_t midi_wire_count;
+static uint64_t midi_wire_tail_cycle;
+static int duart_rx_a_enabled;
 static uint8_t panel_rx[PANEL_RX_SIZE];
 static size_t panel_rx_read;
 static size_t panel_rx_write;
@@ -242,6 +255,11 @@ static uint8_t panel_indicator_command_pending;
 static uint8_t panel_last_tx;
 static int panel_pick_instrument_seen;
 static int panel_file_loaded_seen;
+
+#ifndef EPS16_PANEL_DISPLAY_PUBLISHED
+#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
+    ((void)0)
+#endif
 
 static int panel_dotted_digit(uint8_t code, char *digit) {
     /* Original-OS table at CPU c0228c.  These are the KPC/VFD codes for
@@ -633,6 +651,8 @@ static void live_command(const char *line) {
     } else if (!strcmp(line, "quit")) {
         live_quit = 1;
     } else if (!strcmp(line, "display")) {
+        EPS16_PANEL_DISPLAY_PUBLISHED(panel_display, panel_display_decimal_mask,
+                                      panel_cursor_start, panel_cursor_end);
         live_host_display(panel_display, panel_display_decimal_mask,
                           panel_cursor_start, panel_cursor_end);
     } else {
@@ -657,6 +677,8 @@ static void live_service(void) {
        character. */
     if (panel_display_dirty &&
         current_cycle - panel_display_last_change_cycle >= 100000) {
+        EPS16_PANEL_DISPLAY_PUBLISHED(panel_display, panel_display_decimal_mask,
+                                      panel_cursor_start, panel_cursor_end);
         live_host_display(panel_display, panel_display_decimal_mask,
                           panel_cursor_start, panel_cursor_end);
         panel_display_dirty = 0;
@@ -928,6 +950,29 @@ static int panel_schedule_at(uint8_t value, uint64_t cycle) {
     return 1;
 }
 
+static int midi_schedule_at(uint8_t value, uint64_t cycle) {
+    if (midi_wire_count == MIDI_WIRE_SIZE) return 0;
+    uint64_t arrival = cycle + MIDI_BYTE_CYCLES;
+    if (midi_wire_count && midi_wire_tail_cycle >= arrival)
+        arrival = midi_wire_tail_cycle + MIDI_BYTE_CYCLES;
+    midi_wire[midi_wire_write] = (MidiWireByte){arrival, value};
+    midi_wire_write = (midi_wire_write + 1) % MIDI_WIRE_SIZE;
+    ++midi_wire_count;
+    midi_wire_tail_cycle = arrival;
+    return 1;
+}
+
+static void midi_service_wire(uint64_t cycle) {
+    while (midi_wire_count && midi_wire[midi_wire_read].cycle <= cycle &&
+           midi_rx_count < MIDI_RX_SIZE) {
+        midi_rx[midi_rx_write] = midi_wire[midi_wire_read].value;
+        midi_rx_write = (midi_rx_write + 1) % MIDI_RX_SIZE;
+        ++midi_rx_count;
+        midi_wire_read = (midi_wire_read + 1) % MIDI_WIRE_SIZE;
+        --midi_wire_count;
+    }
+}
+
 static void kpc_execution_start_physical(uint64_t cycle) {
     if (kpc_physical_active || !kpc_physical_queue_count ||
         cycle < kpc_physical_next_cycle)
@@ -1087,12 +1132,29 @@ static void duart_service_time(uint64_t cycle) {
     if (!duart_tx_a_ready && cycle >= duart_tx_a_ready_cycle) duart_tx_a_ready = 1;
     if (!duart_tx_b_ready && cycle >= duart_tx_b_ready_cycle) duart_tx_b_ready = 1;
     panel_service_wire(cycle);
+    midi_service_wire(cycle);
     if (duart_timer_running && cycle >= duart_timer_next_cycle) {
         duart_timer_pending = 1;
         uint64_t period = duart_timer_period_cycles();
         do duart_timer_next_cycle += period;
         while (cycle >= duart_timer_next_cycle);
     }
+}
+
+static unsigned int midi_dequeue(void) {
+    if (!midi_rx_count) return 0;
+    const unsigned int value = midi_rx[midi_rx_read];
+    midi_rx_read = (midi_rx_read + 1) % MIDI_RX_SIZE;
+    --midi_rx_count;
+    ++midi_rx_consumed;
+    if (getenv("EPS16_TRACE_MIDI_INPUT"))
+        fprintf(stderr,
+                "midi_rx value=%02x pc=%06x cycle=%lld remaining=%zu imr=%02x enabled=%d\n",
+                value, m68k_get_reg(NULL, M68K_REG_PC) & 0xffffff,
+                current_cycle, midi_rx_count, duart_registers[5],
+                duart_rx_a_enabled);
+    duart_refresh_irq_line();
+    return value;
 }
 
 static unsigned int panel_dequeue(void) {
@@ -1119,6 +1181,7 @@ static unsigned int panel_dequeue(void) {
 
 static unsigned int duart_interrupt_status(void) {
     return (duart_tx_a_enabled && duart_tx_a_ready ? 0x01 : 0x00) |
+           (duart_rx_a_enabled && midi_rx_count ? 0x02 : 0x00) |
            (duart_timer_pending ? 0x08 : 0x00) |
            (duart_tx_b_enabled && duart_tx_b_ready ? 0x10 : 0x00) |
            (panel_rx_count ? 0x20 : 0x00);
@@ -1147,7 +1210,9 @@ static unsigned int duart_read(unsigned int address) {
     unsigned int reg = ((address - DUART_BASE) >> 1) & 15;
     if (reg == 5) return duart_interrupt_status();
     if (reg == 1)
-        return duart_tx_a_enabled && duart_tx_a_ready ? 0x0c : 0x00; /* SRA */
+        return (duart_tx_a_enabled && duart_tx_a_ready ? 0x0c : 0x00) |
+               (duart_rx_a_enabled && midi_rx_count ? 0x01 : 0x00); /* SRA */
+    if (reg == 3) return midi_dequeue(); /* RHRA */
     if (reg == 9)
         return (duart_tx_b_enabled && duart_tx_b_ready ? 0x0c : 0x00) |
                (panel_rx_count ? 0x01 : 0x00); /* SRB */
@@ -1189,6 +1254,8 @@ static void duart_write(unsigned int address, unsigned int value) {
         m68k_end_timeslice();
     }
     if (reg == 2) { /* CRA: channel-A receiver/transmitter commands */
+        if (value & 0x01) duart_rx_a_enabled = 1;
+        if (value & 0x02) duart_rx_a_enabled = 0;
         if (value & 0x04) duart_tx_a_enabled = 1;
         if (value & 0x08) duart_tx_a_enabled = 0;
         duart_refresh_irq_line();
@@ -1226,6 +1293,11 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_noncell_parameter_pending = 0;
             panel_indicator_command_pending = 0;
         } else if (value == 'f') {
+            if (panel_display_dirty)
+                EPS16_PANEL_DISPLAY_PUBLISHED(panel_display,
+                                              panel_display_decimal_mask,
+                                              panel_cursor_start,
+                                              panel_cursor_end);
             if (live_mode && panel_display_dirty)
                 live_host_display(panel_display, panel_display_decimal_mask,
                                   panel_cursor_start, panel_cursor_end);
@@ -1249,7 +1321,7 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_cursor_width_pending = 0;
             panel_cursor_width_known = 0;
             panel_noncell_parameter_pending = 0;
-            panel_display_dirty = 1;
+            panel_display_dirty = 0;
             panel_display_last_change_cycle = current_cycle;
         } else if (panel_indicator_command_pending) {
             const unsigned int command = panel_indicator_command_pending;
@@ -1339,10 +1411,14 @@ static void duart_write(unsigned int address, unsigned int value) {
         /* Publish complete VFD updates atomically.  Exposing every transport
            byte makes fast hardware frames visibly crawl in a 60 Hz browser,
            even though the physical panel presents the completed field. */
-        if (live_mode &&
-            (panel_cursor >= 22 || value == 0x71 || value == 0x72)) {
-            live_host_display(panel_display, panel_display_decimal_mask,
-                              panel_cursor_start, panel_cursor_end);
+        if (panel_cursor >= 22 || value == 0x71 || value == 0x72) {
+            EPS16_PANEL_DISPLAY_PUBLISHED(panel_display,
+                                          panel_display_decimal_mask,
+                                          panel_cursor_start,
+                                          panel_cursor_end);
+            if (live_mode)
+                live_host_display(panel_display, panel_display_decimal_mask,
+                                  panel_cursor_start, panel_cursor_end);
             panel_display_dirty = 0;
         }
         if (value == 0x72 && getenv("EPS16_TRACE_DISPLAY"))
