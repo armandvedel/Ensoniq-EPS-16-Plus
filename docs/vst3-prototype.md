@@ -54,6 +54,10 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   still come from the user's external files.
 - The 22-cell VFD is left aligned like the rack display and renders the
   decimal-point bitmask and original-OS cursor independently of the text.
+- The editor follows the low-profile rack-panel proportions: Volume and mode
+  controls at the left, page matrix and Data Entry in the centre, a full-width
+  22-cell VFD above the eight track keys, and sampling/sequencer controls at
+  the right. Resizing preserves the photographed rack aspect ratio.
 
 The current sink executes the authentic machine and is audible, but its state
 is still file-static inside the loaded VST module. It is therefore not yet
