@@ -233,9 +233,9 @@ static int panel_cursor_width_pending;
 static int panel_cursor_width_known;
 static int panel_noncell_parameter_pending;
 /* The keypad/display protocol has three independently-addressed 16-way lamp
-   banks. 74-76, 77-79 and 7a-7c select off/on/flash respectively; the next
-   byte is the physical lamp index. Keeping the raw banks here preserves the
-   original OS/KPC ownership of every annunciator and panel LED. */
+   banks. 74/75/76 select slot LED off/on/flash; 77/78/79 and 7a/7b/7c select
+   display annunciator on/off/flash. The next byte is the physical index.
+   Keeping the raw banks preserves original OS/KPC ownership of every lamp. */
 static uint16_t panel_indicator_on[3];
 static uint16_t panel_indicator_flash[3];
 static uint8_t panel_indicator_command_pending;
@@ -1256,10 +1256,12 @@ static void duart_write(unsigned int address, unsigned int value) {
             const unsigned int bank = (command - 0x74U) / 3U;
             const unsigned int operation = (command - 0x74U) % 3U;
             const uint16_t bit = (uint16_t)(UINT16_C(1) << (value & 0x0fU));
-            if (operation == 0) {
+            const int off = bank == 0 ? operation == 0 : operation == 1;
+            const int on = bank == 0 ? operation == 1 : operation == 0;
+            if (off) {
                 panel_indicator_on[bank] &= (uint16_t)~bit;
                 panel_indicator_flash[bank] &= (uint16_t)~bit;
-            } else if (operation == 1) {
+            } else if (on) {
                 panel_indicator_on[bank] |= bit;
                 panel_indicator_flash[bank] &= (uint16_t)~bit;
             } else {

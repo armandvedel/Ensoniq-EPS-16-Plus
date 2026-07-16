@@ -49,11 +49,27 @@ inferred by the browser.
 The VST decoder also retains the three raw 16-way lamp banks addressed by the
 paired command ranges `74..7c`. Each command consumes its following physical
 index byte; the resulting on/flash masks are copied to the editor without
-examining the 22-character text. The rack glass permanently prints three
-annunciator rows above the character cells. Only indices verified against a
-known original-OS state and the photographed glass are assigned a legend;
-unverified legends stay visibly printed but dark rather than being inferred
-from menu text.
+examining the 22-character text. The protocol directions are asymmetric:
+
+- `74/75/76` switch the 16 Instrument/Track LEDs off/on/blinking. Indices
+  `0..7` are the upper **Loaded** row and `8..15` the lower **Selected** row.
+- `77/78/79` switch the left annunciator bank on/off/blinking.
+- `7a/7b/7c` switch the right annunciator bank on/off/blinking.
+
+The complete annunciator index map was cross-checked against the original OS
+traffic, the photographed rack glass and the independent
+[Ensoniq display hardware sniffer](https://github.com/balamutang/ensoniqdisplay).
+The editor is a direct electrical mirror: no display string or menu state
+selects a lamp.
+
+Left bank (`77..79`): `02 SEQ`, `03 MIDI`, `04 SONG`, `05 EDIT`,
+`06 FILTER`, `07 BANK`, `08 WAVE`, `09 LFO`, `0a PITCH`, `0b LAYER`,
+`0c SYSTEM`, `0d CMD`, `0e INST`, `0f LOAD`. Indices `00/01` are not printed
+on the EPS-16 Plus rack glass.
+
+Right bank (`7a..7c`): `01 BAR`, `02 SONG`, `03 REC`, `04 SEQ`, `05 TRACK`,
+`06 REP`, `07 BEAT`, `08 MACRO`, `09 CLOCK`, `0a STEP`, `0b STOP`, `0c PLAY`,
+`0d AMP`, `0e ODUB`, `0f ENV`. Index `00` is not printed.
 
 | Control | Self-test glyph code | Deprecated packet hypothesis |
 |---|---:|---|

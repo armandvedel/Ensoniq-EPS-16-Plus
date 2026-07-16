@@ -64,6 +64,9 @@ private:
     std::array<PanelButton *, 12> pageButtons{};
     std::array<PanelButton *, 7> modeButtons{};
     std::array<PanelButton *, 8> trackButtons{};
+    std::uint16_t trackLedOn{};
+    std::uint16_t trackLedFlash{};
+    bool trackLedFlashPhase{};
     std::array<PanelButton *, 3> sequencerButtons{};
     PanelButton *upButton{};
     PanelButton *downButton{};

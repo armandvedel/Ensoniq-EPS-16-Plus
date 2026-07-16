@@ -70,6 +70,9 @@ int main(int argc, char **argv) {
     eps16_probe_machine_sampling_input(0.25f, -0.125f);
     run_for(50000000);
     display_starts_with("");
+    print_indicators("sample-track1");
+    if ((eps16_probe_machine_indicator_on(0) & 0x0101U) != 0x0101U)
+        return 1;
 
     /* The sampling level meter uses non-character VFD traffic. ENTER release
        is the original OS/KPC transition into RECORD; a later ENTER press is

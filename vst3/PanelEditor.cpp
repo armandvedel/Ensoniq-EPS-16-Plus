@@ -55,28 +55,27 @@ void Eps16PanelEditor::VfdLabel::paint(juce::Graphics &graphics) {
         int bank;
         int bit;
     };
-    /* The legends and positions are part of the physical VFD glass. Raw
-       indices are assigned only where the original KPC stream and a known OS
-       page give an unambiguous match; unverified legends remain printed but
-       cannot be falsely illuminated by GUI/menu state. */
+    /* The legends and positions are part of the physical VFD glass. Indices
+       follow the serial hardware mapping recovered by an Ensoniq display
+       sniffer and are driven only by original OS/KPC traffic. */
     static const Legend legends[] = {
         {"LOAD", 0.00f, 0.00f, 1, 15}, {"INST", 0.13f, 0.00f, 1, 14},
-        {"MIDI", 0.25f, 0.00f, -1, -1}, {"SYS", 0.36f, 0.00f, 1, 12},
-        {"LAYER", 0.47f, 0.00f, -1, -1},
-        {"ENV", 0.64f, 0.00f, -1, -1}, {"ODUB", 0.72f, 0.00f, -1, -1},
-        {"REC", 0.81f, 0.00f, -1, -1}, {"PLAY", 0.88f, 0.00f, -1, -1},
-        {"STOP", 0.95f, 0.00f, -1, -1},
-        {"CMD", 0.00f, 1.00f, -1, -1}, {"SEQ", 0.13f, 1.00f, 1, 2},
-        {"SONG", 0.25f, 1.00f, -1, -1}, {"PITCH", 0.36f, 1.00f, -1, -1},
-        {"FILTER", 0.49f, 1.00f, -1, -1},
-        {"AMP", 0.64f, 1.00f, -1, -1}, {"SONG", 0.72f, 1.00f, -1, -1},
-        {"SEQ", 0.81f, 1.00f, -1, -1}, {"STEP", 0.88f, 1.00f, -1, -1},
-        {"REP", 0.96f, 1.00f, -1, -1},
-        {"EDIT", 0.00f, 2.00f, 1, 5}, {"MACRO", 0.13f, 2.00f, -1, -1},
-        {"BANK", 0.27f, 2.00f, -1, -1}, {"LFO", 0.38f, 2.00f, -1, -1},
-        {"WAVE", 0.47f, 2.00f, -1, -1},
-        {"TRACK", 0.64f, 2.00f, -1, -1}, {"BAR", 0.76f, 2.00f, -1, -1},
-        {"BEAT", 0.84f, 2.00f, -1, -1}, {"CLOCK", 0.92f, 2.00f, -1, -1}
+        {"MIDI", 0.25f, 0.00f, 1, 3}, {"SYSTEM", 0.36f, 0.00f, 1, 12},
+        {"LAYER", 0.49f, 0.00f, 1, 11},
+        {"ENV", 0.64f, 0.00f, 2, 15}, {"ODUB", 0.72f, 0.00f, 2, 14},
+        {"REC", 0.81f, 0.00f, 2, 3}, {"PLAY", 0.88f, 0.00f, 2, 12},
+        {"STOP", 0.95f, 0.00f, 2, 11},
+        {"CMD", 0.00f, 1.00f, 1, 13}, {"SEQ", 0.13f, 1.00f, 1, 2},
+        {"SONG", 0.25f, 1.00f, 1, 4}, {"PITCH", 0.36f, 1.00f, 1, 10},
+        {"FILTER", 0.49f, 1.00f, 1, 6},
+        {"AMP", 0.64f, 1.00f, 2, 13}, {"SONG", 0.72f, 1.00f, 2, 2},
+        {"SEQ", 0.81f, 1.00f, 2, 4}, {"STEP", 0.88f, 1.00f, 2, 10},
+        {"REP", 0.96f, 1.00f, 2, 6},
+        {"EDIT", 0.00f, 2.00f, 1, 5}, {"MACRO", 0.13f, 2.00f, 2, 8},
+        {"BANK", 0.27f, 2.00f, 1, 7}, {"LFO", 0.38f, 2.00f, 1, 9},
+        {"WAVE", 0.47f, 2.00f, 1, 8},
+        {"TRACK", 0.64f, 2.00f, 2, 5}, {"BAR", 0.76f, 2.00f, 2, 1},
+        {"BEAT", 0.84f, 2.00f, 2, 7}, {"CLOCK", 0.92f, 2.00f, 2, 9}
     };
     graphics.setFont(juce::Font(juce::FontOptions("Helvetica Neue", 8.0f,
                                                   juce::Font::bold)));
@@ -283,6 +282,16 @@ void Eps16PanelEditor::timerCallback() {
     }
     vfd.setIndicators(indicatorOn, indicatorFlash,
                       ((owner.cpuCycles() / 2500000U) & 1U) != 0);
+    const auto nextTrackOn = owner.machineIndicatorOn(0);
+    const auto nextTrackFlash = owner.machineIndicatorFlash(0);
+    const bool nextTrackPhase = ((owner.cpuCycles() / 2500000U) & 1U) != 0;
+    if (trackLedOn != nextTrackOn || trackLedFlash != nextTrackFlash ||
+        trackLedFlashPhase != nextTrackPhase) {
+        trackLedOn = nextTrackOn;
+        trackLedFlash = nextTrackFlash;
+        trackLedFlashPhase = nextTrackPhase;
+        repaint();
+    }
     status.setText("DAW-driven CPU cycles: " + juce::String(owner.cpuCycles()) +
                        " | " + owner.machineStatus() +
                        " | illegal instructions: " +
@@ -356,10 +365,50 @@ void Eps16PanelEditor::paint(juce::Graphics &graphics) {
     graphics.drawText(
         juce::CharPointer_UTF8("INSTRUMENTS  \xe2\x80\xa2  TRACKS"),
         trackHeaderX,
-                      trackButtons.front()->getY() - juce::roundToInt(27 * scale),
+                      trackButtons.front()->getY() - juce::roundToInt(38 * scale),
                       trackHeaderRight - trackHeaderX,
-                      juce::roundToInt(17 * scale),
+                      juce::roundToInt(13 * scale),
                       juce::Justification::centred);
+
+    const auto ledPhase = [this](unsigned int bit) {
+        const auto mask = (std::uint16_t)(UINT16_C(1) << bit);
+        return (trackLedOn & mask) &&
+               (!(trackLedFlash & mask) || trackLedFlashPhase);
+    };
+    const auto loadedColour = juce::Colour(0xffdc8732);
+    const auto selectedColour = juce::Colour(0xffffd84b);
+    const auto unlitColour = juce::Colour(0xff252725);
+    for (unsigned int index = 0; index < trackButtons.size(); ++index) {
+        const auto button = trackButtons[index]->getBounds();
+        const int ledWidth = juce::roundToInt(17.0f * scale);
+        const int ledHeight = juce::jmax(2, juce::roundToInt(4.0f * scale));
+        const int ledX = button.getCentreX() - ledWidth / 2;
+        const int loadedY = button.getY() - juce::roundToInt(20.0f * scale);
+        const int selectedY = button.getY() - juce::roundToInt(11.0f * scale);
+        auto drawLed = [&graphics, unlitColour](juce::Rectangle<int> area,
+                                                juce::Colour colour,
+                                                bool lit) {
+            graphics.setColour(lit ? colour.withAlpha(0.20f) : unlitColour);
+            if (lit) graphics.fillRoundedRectangle(area.expanded(3).toFloat(),
+                                                    2.0f);
+            graphics.setColour(lit ? colour : unlitColour);
+            graphics.fillRoundedRectangle(area.toFloat(), 1.0f);
+        };
+        drawLed({ledX, loadedY, ledWidth, ledHeight}, loadedColour,
+                ledPhase(index));
+        drawLed({ledX, selectedY, ledWidth, ledHeight}, selectedColour,
+                ledPhase(index + 8));
+    }
+    graphics.setFont(5.8f * scale);
+    graphics.setColour(rackLabelColour.withAlpha(0.72f));
+    graphics.drawText("LOADED", trackHeaderX - juce::roundToInt(40 * scale),
+                      trackButtons.front()->getY() - juce::roundToInt(22 * scale),
+                      juce::roundToInt(38 * scale), juce::roundToInt(8 * scale),
+                      juce::Justification::centredRight);
+    graphics.drawText("SELECTED", trackHeaderRight + juce::roundToInt(2 * scale),
+                      trackButtons.front()->getY() - juce::roundToInt(13 * scale),
+                      juce::roundToInt(45 * scale), juce::roundToInt(8 * scale),
+                      juce::Justification::centredLeft);
 
     graphics.setFont(7.5f * scale);
     static const char *sequenceLabels[3] = {"RECORD", "STOP / CONT", "PLAY"};

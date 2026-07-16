@@ -52,10 +52,13 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   state. A project can therefore reopen with its instruments and samples
   already resident. ROM and KPC firmware bytes are deliberately excluded and
   still come from the user's external files.
-- The rack VFD now includes the three permanently printed annunciator rows
-  above the 22-character line. Verified lamps are driven from raw KPC command
-  masks, never from display text or browser menu state. The cyan-on-dark glass
-  colour follows the supplied hardware close-up.
+- The rack VFD includes the three permanently printed annunciator rows above
+  the 22-character line. All printed lamps are driven from the decoded
+  `77..7c` KPC command banks, never from display text or browser menu state.
+  The cyan-on-dark glass colour follows the supplied hardware close-up.
+- The two physical LEDs above every Instrument/Track key mirror the `74..76`
+  bank: upper means Loaded, lower means Selected, and the OS-provided flash
+  state represents a stacked instrument.
 - The changing 22-character line uses compact monospaced cells anchored at the
   left edge instead of distributing the characters across the full window;
   decimal points and the original-OS cursor remain independent attributes.

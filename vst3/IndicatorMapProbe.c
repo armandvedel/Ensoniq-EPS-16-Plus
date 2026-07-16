@@ -17,7 +17,10 @@ static void click(uint8_t code) {
 }
 
 static void show(const char *label) {
-    printf("%-12s %04x/%04x %04x/%04x %04x/%04x\n", label,
+    char display[23];
+    eps16_probe_machine_display(display);
+    printf("%-12s |%s| %04x/%04x %04x/%04x %04x/%04x\n", label,
+           display,
            eps16_probe_machine_indicator_on(0),
            eps16_probe_machine_indicator_flash(0),
            eps16_probe_machine_indicator_on(1),
@@ -46,7 +49,11 @@ int main(int argc, char **argv) {
     for (unsigned int index = 0;
          index < sizeof(pages) / sizeof(pages[0]); ++index) {
         click(pages[index].code);
-        click(0x10);
+        /* 3f is outside the verified panel matrix and is ignored by the OS;
+           it supplies the next physical KPC transaction without selecting a
+           different parameter or manufacturing display state. */
+        click(0x3f);
+        click(0x3f);
         show(pages[index].name);
     }
     return eps16_probe_machine_illegal_instructions() ? 1 : 0;
