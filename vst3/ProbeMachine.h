@@ -28,6 +28,8 @@ void eps16_probe_machine_sampling_input(float left, float right);
 void eps16_probe_machine_stereo_output(float *left, float *right);
 void eps16_probe_machine_display(char display[23]);
 uint32_t eps16_probe_machine_decimal_mask(void);
+uint16_t eps16_probe_machine_indicator_on(unsigned int bank);
+uint16_t eps16_probe_machine_indicator_flash(unsigned int bank);
 void eps16_probe_machine_cursor(int *start, int *end);
 uint64_t eps16_probe_machine_cycles(void);
 size_t eps16_probe_machine_illegal_instructions(void);

@@ -52,8 +52,13 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   state. A project can therefore reopen with its instruments and samples
   already resident. ROM and KPC firmware bytes are deliberately excluded and
   still come from the user's external files.
-- The 22-cell VFD is left aligned like the rack display and renders the
-  decimal-point bitmask and original-OS cursor independently of the text.
+- The rack VFD now includes the three permanently printed annunciator rows
+  above the 22-character line. Verified lamps are driven from raw KPC command
+  masks, never from display text or browser menu state. The cyan-on-dark glass
+  colour follows the supplied hardware close-up.
+- The changing 22-character line uses compact monospaced cells anchored at the
+  left edge instead of distributing the characters across the full window;
+  decimal points and the original-OS cursor remain independent attributes.
 - The editor follows the low-profile rack-panel proportions: Volume and mode
   controls at the left, page matrix and Data Entry in the centre, a full-width
   22-cell VFD above the eight track keys, and sampling/sequencer controls at

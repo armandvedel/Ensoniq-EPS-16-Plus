@@ -53,6 +53,12 @@ public:
     std::uint32_t machineDecimalMask() const {
         return machineSink.decimalMask();
     }
+    std::uint16_t machineIndicatorOn(unsigned int bank) const {
+        return machineSink.indicatorOn(bank);
+    }
+    std::uint16_t machineIndicatorFlash(unsigned int bank) const {
+        return machineSink.indicatorFlash(bank);
+    }
     std::size_t illegalInstructions() const {
         return machineSink.illegalInstructions();
     }

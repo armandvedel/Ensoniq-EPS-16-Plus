@@ -22,12 +22,18 @@ private:
     public:
         void setCursorRange(int start, int end);
         void setDecimalMask(std::uint32_t mask);
+        void setIndicators(const std::array<std::uint16_t, 3> &on,
+                           const std::array<std::uint16_t, 3> &flash,
+                           bool flashPhase);
         void paint(juce::Graphics &) override;
 
     private:
         int cursorStart{-1};
         int cursorEnd{-1};
         std::uint32_t decimalMask{};
+        std::array<std::uint16_t, 3> indicatorOn{};
+        std::array<std::uint16_t, 3> indicatorFlash{};
+        bool indicatorFlashPhase{};
     };
 
     class PanelButton final : public juce::TextButton {

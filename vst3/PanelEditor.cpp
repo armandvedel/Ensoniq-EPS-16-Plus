@@ -1,13 +1,15 @@
 #include "PanelEditor.h"
 
 #include <array>
+#include <cstring>
 
 namespace {
 constexpr int rackWidth = 1350;
 constexpr int rackHeight = 285;
 const juce::Colour panelColour{0xff3b3d3c};
 const juce::Colour buttonColour{0xff252625};
-const juce::Colour displayColour{0xfff2d24b};
+const juce::Colour displayColour{0xff55eaff};
+const juce::Colour displayDimColour{0xff17353a};
 const juce::Colour rackLabelColour{0xffe8e5df};
 const juce::Colour accentColour{0xff9d4f82};
 }
@@ -28,13 +30,93 @@ void Eps16PanelEditor::VfdLabel::setDecimalMask(std::uint32_t mask) {
     repaint();
 }
 
+void Eps16PanelEditor::VfdLabel::setIndicators(
+    const std::array<std::uint16_t, 3> &on,
+    const std::array<std::uint16_t, 3> &flash, bool flashPhase) {
+    if (indicatorOn == on && indicatorFlash == flash &&
+        indicatorFlashPhase == flashPhase) return;
+    indicatorOn = on;
+    indicatorFlash = flash;
+    indicatorFlashPhase = flashPhase;
+    repaint();
+}
+
 void Eps16PanelEditor::VfdLabel::paint(juce::Graphics &graphics) {
     graphics.fillAll(findColour(juce::Label::backgroundColourId));
-    const auto textArea = getLocalBounds().reduced(8, 6).toFloat();
+    const auto bounds = getLocalBounds().reduced(8, 5).toFloat();
     const auto font = getFont();
-    const float cellWidth = textArea.getWidth() / 22.0f;
+    const float indicatorHeight = bounds.getHeight() * 0.54f;
+    const float rowHeight = indicatorHeight / 3.0f;
+
+    struct Legend {
+        const char *text;
+        float x;
+        float y;
+        int bank;
+        int bit;
+    };
+    /* The legends and positions are part of the physical VFD glass. Raw
+       indices are assigned only where the original KPC stream and a known OS
+       page give an unambiguous match; unverified legends remain printed but
+       cannot be falsely illuminated by GUI/menu state. */
+    static const Legend legends[] = {
+        {"LOAD", 0.00f, 0.00f, 1, 15}, {"INST", 0.13f, 0.00f, 1, 14},
+        {"MIDI", 0.25f, 0.00f, -1, -1}, {"SYS", 0.36f, 0.00f, 1, 12},
+        {"LAYER", 0.47f, 0.00f, -1, -1},
+        {"ENV", 0.64f, 0.00f, -1, -1}, {"ODUB", 0.72f, 0.00f, -1, -1},
+        {"REC", 0.81f, 0.00f, -1, -1}, {"PLAY", 0.88f, 0.00f, -1, -1},
+        {"STOP", 0.95f, 0.00f, -1, -1},
+        {"CMD", 0.00f, 1.00f, -1, -1}, {"SEQ", 0.13f, 1.00f, 1, 2},
+        {"SONG", 0.25f, 1.00f, -1, -1}, {"PITCH", 0.36f, 1.00f, -1, -1},
+        {"FILTER", 0.49f, 1.00f, -1, -1},
+        {"AMP", 0.64f, 1.00f, -1, -1}, {"SONG", 0.72f, 1.00f, -1, -1},
+        {"SEQ", 0.81f, 1.00f, -1, -1}, {"STEP", 0.88f, 1.00f, -1, -1},
+        {"REP", 0.96f, 1.00f, -1, -1},
+        {"EDIT", 0.00f, 2.00f, 1, 5}, {"MACRO", 0.13f, 2.00f, -1, -1},
+        {"BANK", 0.27f, 2.00f, -1, -1}, {"LFO", 0.38f, 2.00f, -1, -1},
+        {"WAVE", 0.47f, 2.00f, -1, -1},
+        {"TRACK", 0.64f, 2.00f, -1, -1}, {"BAR", 0.76f, 2.00f, -1, -1},
+        {"BEAT", 0.84f, 2.00f, -1, -1}, {"CLOCK", 0.92f, 2.00f, -1, -1}
+    };
+    graphics.setFont(juce::Font(juce::FontOptions("Helvetica Neue", 8.0f,
+                                                  juce::Font::bold)));
+    for (const auto &legend : legends) {
+        const bool on = legend.bank >= 0 &&
+            (indicatorOn[(std::size_t)legend.bank] &
+             (UINT16_C(1) << legend.bit));
+        const bool flashing = on &&
+            (indicatorFlash[(std::size_t)legend.bank] &
+             (UINT16_C(1) << legend.bit));
+        const bool lit = on && (!flashing || indicatorFlashPhase);
+        const float width = juce::jmax(
+            28.0f, (float)std::strlen(legend.text) * 5.1f + 4.0f);
+        const auto area = juce::Rectangle<float>(
+            bounds.getX() + legend.x * (bounds.getWidth() - 28.0f),
+            bounds.getY() + legend.y * rowHeight, width, rowHeight);
+        if (lit) {
+            graphics.setColour(displayColour.withAlpha(0.18f));
+            for (int offset = 3; offset >= 1; --offset)
+                graphics.drawText(legend.text, area.expanded((float)offset),
+                                  juce::Justification::centredLeft, false);
+            graphics.setColour(displayColour);
+        } else {
+            graphics.setColour(displayDimColour);
+        }
+        graphics.drawText(legend.text, area, juce::Justification::centredLeft,
+                          false);
+    }
+
+    const auto textArea = juce::Rectangle<float>(
+        bounds.getX(), bounds.getY() + indicatorHeight + 3.0f,
+        bounds.getWidth(), bounds.getHeight() - indicatorHeight - 3.0f);
+    const float cellWidth = font.getHeight() * 0.66f;
     const float baselineY = textArea.getCentreY() + font.getHeight() * 0.34f;
 
+    graphics.setColour(findColour(juce::Label::textColourId).withAlpha(0.16f));
+    graphics.setFont(font);
+    graphics.drawText(getText().paddedRight(' ', 22).substring(0, 22),
+                      textArea.translated(0.0f, 1.0f),
+                      juce::Justification::centredLeft, false);
     graphics.setColour(findColour(juce::Label::textColourId));
     graphics.setFont(font);
     const auto text = getText().paddedRight(' ', 22).substring(0, 22);
@@ -193,6 +275,14 @@ void Eps16PanelEditor::timerCallback() {
     vfd.setText(owner.machineDisplay(), juce::dontSendNotification);
     vfd.setCursorRange(owner.machineCursorStart(), owner.machineCursorEnd());
     vfd.setDecimalMask(owner.machineDecimalMask());
+    std::array<std::uint16_t, 3> indicatorOn{};
+    std::array<std::uint16_t, 3> indicatorFlash{};
+    for (unsigned int bank = 0; bank < indicatorOn.size(); ++bank) {
+        indicatorOn[bank] = owner.machineIndicatorOn(bank);
+        indicatorFlash[bank] = owner.machineIndicatorFlash(bank);
+    }
+    vfd.setIndicators(indicatorOn, indicatorFlash,
+                      ((owner.cpuCycles() / 2500000U) & 1U) != 0);
     status.setText("DAW-driven CPU cycles: " + juce::String(owner.cpuCycles()) +
                        " | " + owner.machineStatus() +
                        " | illegal instructions: " +
@@ -353,7 +443,7 @@ void Eps16PanelEditor::resized() {
     };
 
     vfd.setBounds(rackRect(696, 27, 444, 101));
-    vfd.setFont(juce::Font(juce::FontOptions("Menlo", 20.0f * scale,
+    vfd.setFont(juce::Font(juce::FontOptions("Menlo", 17.0f * scale,
                                              juce::Font::plain)));
     status.setBounds({});
     masterVolume.setBounds(rackRect(36, 25, 76, 198));

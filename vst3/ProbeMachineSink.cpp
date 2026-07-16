@@ -106,6 +106,13 @@ void ProbeMachineSink::publishDisplay() {
     displayCursorStart.store(cursorStart, std::memory_order_relaxed);
     displayCursorEnd.store(cursorEnd, std::memory_order_relaxed);
     displayDecimalMask.store(decimalMask, std::memory_order_relaxed);
+    for (unsigned int bank = 0; bank < displayIndicatorOn.size(); ++bank) {
+        displayIndicatorOn[bank].store(
+            eps16_probe_machine_indicator_on(bank), std::memory_order_relaxed);
+        displayIndicatorFlash[bank].store(
+            eps16_probe_machine_indicator_flash(bank),
+            std::memory_order_relaxed);
+    }
 }
 
 std::string ProbeMachineSink::display() const {

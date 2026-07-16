@@ -27,6 +27,16 @@ static int display_starts_with(const char *expected) {
     return !strncmp(display, expected, strlen(expected));
 }
 
+static void print_indicators(const char *label) {
+    printf("indicators[%s]=%04x/%04x %04x/%04x %04x/%04x\n", label,
+           eps16_probe_machine_indicator_on(0),
+           eps16_probe_machine_indicator_flash(0),
+           eps16_probe_machine_indicator_on(1),
+           eps16_probe_machine_indicator_flash(1),
+           eps16_probe_machine_indicator_on(2),
+           eps16_probe_machine_indicator_flash(2));
+}
+
 int main(int argc, char **argv) {
     if (argc != 4 && argc != 5) {
         fprintf(stderr, "usage: %s COMBINED_ROM KPC_ROM OS_DISK [SNAPSHOT]\n",
@@ -41,12 +51,21 @@ int main(int argc, char **argv) {
     }
     eps16_probe_machine_run_until(220000000);
     if (!display_starts_with("NO INSTRUMENTS")) return 1;
+    print_indicators("load-instrument");
     if (eps16_probe_machine_illegal_instructions()) return 1;
+
+    click(0x05);
+    click(0x1b);
+    run_for(10000000);
+    display_starts_with("");
+    print_indicators("edit-system-midi");
 
     /* Exercise the same raw physical KPC transitions emitted by the VST GUI.
        SAMPLE and Track 1 must remain decisions of the original firmware/OS. */
     click(0x20);
     if (!display_starts_with("PICK SAMPLE INSTRUMENT")) return 1;
+    run_for(5000000);
+    print_indicators("pick-sample-instrument");
     click(0x02);
     eps16_probe_machine_sampling_input(0.25f, -0.125f);
     run_for(50000000);

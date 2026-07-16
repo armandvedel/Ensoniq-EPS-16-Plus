@@ -108,6 +108,9 @@ add_test(NAME vst3_bandlimited_resampler
 add_executable(eps16_probe_machine_test ProbeMachineTest.c)
 target_link_libraries(eps16_probe_machine_test PRIVATE eps16_probe_machine)
 
+add_executable(eps16_indicator_map_probe IndicatorMapProbe.c)
+target_link_libraries(eps16_indicator_map_probe PRIVATE eps16_probe_machine)
+
 add_executable(eps16_probe_machine_restore_test ProbeMachineRestoreTest.c)
 target_link_libraries(eps16_probe_machine_restore_test PRIVATE eps16_probe_machine)
 

@@ -232,6 +232,13 @@ static int panel_cursor_active;
 static int panel_cursor_width_pending;
 static int panel_cursor_width_known;
 static int panel_noncell_parameter_pending;
+/* The keypad/display protocol has three independently-addressed 16-way lamp
+   banks. 74-76, 77-79 and 7a-7c select off/on/flash respectively; the next
+   byte is the physical lamp index. Keeping the raw banks here preserves the
+   original OS/KPC ownership of every annunciator and panel LED. */
+static uint16_t panel_indicator_on[3];
+static uint16_t panel_indicator_flash[3];
+static uint8_t panel_indicator_command_pending;
 static uint8_t panel_last_tx;
 static int panel_pick_instrument_seen;
 static int panel_file_loaded_seen;
@@ -1217,6 +1224,7 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_cursor_width_pending = 0;
             panel_cursor_width_known = 0;
             panel_noncell_parameter_pending = 0;
+            panel_indicator_command_pending = 0;
         } else if (value == 'f') {
             if (live_mode && panel_display_dirty)
                 live_host_display(panel_display, panel_display_decimal_mask,
@@ -1243,6 +1251,32 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_noncell_parameter_pending = 0;
             panel_display_dirty = 1;
             panel_display_last_change_cycle = current_cycle;
+        } else if (panel_indicator_command_pending) {
+            const unsigned int command = panel_indicator_command_pending;
+            const unsigned int bank = (command - 0x74U) / 3U;
+            const unsigned int operation = (command - 0x74U) % 3U;
+            const uint16_t bit = (uint16_t)(UINT16_C(1) << (value & 0x0fU));
+            if (operation == 0) {
+                panel_indicator_on[bank] &= (uint16_t)~bit;
+                panel_indicator_flash[bank] &= (uint16_t)~bit;
+            } else if (operation == 1) {
+                panel_indicator_on[bank] |= bit;
+                panel_indicator_flash[bank] &= (uint16_t)~bit;
+            } else {
+                panel_indicator_on[bank] |= bit;
+                panel_indicator_flash[bank] |= bit;
+            }
+            if (getenv("EPS16_TRACE_INDICATORS"))
+                fprintf(stderr,
+                        "indicator command=%02x index=%u banks=%04x/%04x,%04x/%04x,%04x/%04x cycle=%lld\n",
+                        command, value & 0x0fU,
+                        panel_indicator_on[0], panel_indicator_flash[0],
+                        panel_indicator_on[1], panel_indicator_flash[1],
+                        panel_indicator_on[2], panel_indicator_flash[2],
+                        current_cycle);
+            panel_indicator_command_pending = 0;
+        } else if (!panel_cursor_active && value >= 0x74 && value <= 0x7c) {
+            panel_indicator_command_pending = (uint8_t)value;
         } else if (panel_noncell_parameter_pending) {
             /* 12/15 are non-cell VFD commands. Their following argument is
                transport metadata (3c/3e in split coarse/fine address

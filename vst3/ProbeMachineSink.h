@@ -44,6 +44,14 @@ public:
     [[nodiscard]] std::uint32_t decimalMask() const {
         return displayDecimalMask.load(std::memory_order_relaxed);
     }
+    [[nodiscard]] std::uint16_t indicatorOn(unsigned int bank) const {
+        return bank < displayIndicatorOn.size()
+            ? displayIndicatorOn[bank].load(std::memory_order_relaxed) : 0;
+    }
+    [[nodiscard]] std::uint16_t indicatorFlash(unsigned int bank) const {
+        return bank < displayIndicatorFlash.size()
+            ? displayIndicatorFlash[bank].load(std::memory_order_relaxed) : 0;
+    }
     [[nodiscard]] std::size_t illegalInstructions() const;
     [[nodiscard]] std::vector<std::uint8_t> captureState() const;
     bool restoreState(const void *data, std::size_t size);
@@ -61,6 +69,8 @@ private:
     std::atomic<int> displayCursorStart{-1};
     std::atomic<int> displayCursorEnd{-1};
     std::atomic<std::uint32_t> displayDecimalMask{};
+    std::array<std::atomic<std::uint16_t>, 3> displayIndicatorOn{};
+    std::array<std::atomic<std::uint16_t>, 3> displayIndicatorFlash{};
     std::atomic<bool> ready{};
     std::uint64_t cycleBase{};
     BandlimitedResampler resampler;

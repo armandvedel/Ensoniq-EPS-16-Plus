@@ -46,6 +46,15 @@ the decimal point as a per-cell VFD attribute. Bytes after the 22 display cells
 remain lamp, meter, or status commands. No page names or parameter choices are
 inferred by the browser.
 
+The VST decoder also retains the three raw 16-way lamp banks addressed by the
+paired command ranges `74..7c`. Each command consumes its following physical
+index byte; the resulting on/flash masks are copied to the editor without
+examining the 22-character text. The rack glass permanently prints three
+annunciator rows above the character cells. Only indices verified against a
+known original-OS state and the photographed glass are assigned a legend;
+unverified legends stay visibly printed but dark rather than being inferred
+from menu text.
+
 | Control | Self-test glyph code | Deprecated packet hypothesis |
 |---|---:|---|
 | LOAD | `38` | `b8 00 38 00` |

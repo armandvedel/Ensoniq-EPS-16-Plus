@@ -75,6 +75,10 @@ static size_t plugin_panel_pair_count;
     X(plugin_output_left) X(plugin_output_right) X(plugin_panel_pair) \
     X(plugin_panel_pair_count)
 
+#define PLUGIN_SNAPSHOT_V2_FIELDS(X) \
+    X(panel_indicator_on) X(panel_indicator_flash) \
+    X(panel_indicator_command_pending)
+
 typedef struct {
     uint8_t magic[8];
     uint32_t version;
@@ -351,6 +355,14 @@ uint32_t eps16_probe_machine_decimal_mask(void) {
     return panel_display_decimal_mask & 0x3fffffU;
 }
 
+uint16_t eps16_probe_machine_indicator_on(unsigned int bank) {
+    return bank < 3 ? panel_indicator_on[bank] : 0;
+}
+
+uint16_t eps16_probe_machine_indicator_flash(unsigned int bank) {
+    return bank < 3 ? panel_indicator_flash[bank] : 0;
+}
+
 void eps16_probe_machine_cursor(int *start, int *end) {
     if (start) *start = panel_cursor_start;
     if (end) *end = panel_cursor_end;
@@ -377,7 +389,8 @@ size_t eps16_probe_machine_state_size(void) {
 #define SNAPSHOT_FIELD_SIZE(name) + sizeof(name)
     return sizeof(PluginSnapshotHeader) + sizeof(Es5505Core) +
            sizeof(KpcDevice) + m68k_context_size()
-           PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_FIELD_SIZE);
+           PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_FIELD_SIZE)
+           PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_FIELD_SIZE);
 #undef SNAPSHOT_FIELD_SIZE
 }
 
@@ -387,7 +400,7 @@ int eps16_probe_machine_save_state(void *data, size_t size) {
     memset(data, 0, size);
     PluginSnapshotHeader *header = (PluginSnapshotHeader *)data;
     memcpy(header->magic, "EPS16ST\0", 8);
-    header->version = 1;
+    header->version = 2;
     header->header_size = sizeof(*header);
     header->total_size = size;
     header->m68k_context_size = m68k_context_size();
@@ -405,6 +418,7 @@ int eps16_probe_machine_save_state(void *data, size_t size) {
     };
 #define SNAPSHOT_SAVE_FIELD(name) snapshot_write(&writer, &(name), sizeof(name));
     PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_SAVE_FIELD)
+    PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_SAVE_FIELD)
 #undef SNAPSHOT_SAVE_FIELD
 
     Es5505Core saved_es5505 = es5505;
@@ -455,8 +469,14 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     }
     PluginSnapshotHeader header;
     memcpy(&header, data, sizeof(header));
-    const size_t expected = eps16_probe_machine_state_size();
-    if (memcmp(header.magic, "EPS16ST\0", 8) || header.version != 1 ||
+    const size_t expected_v2 = eps16_probe_machine_state_size();
+#define SNAPSHOT_V2_FIELD_SIZE(name) - sizeof(name)
+    const size_t expected_v1 = expected_v2
+        PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_V2_FIELD_SIZE);
+#undef SNAPSHOT_V2_FIELD_SIZE
+    const size_t expected = header.version == 1 ? expected_v1 : expected_v2;
+    if (memcmp(header.magic, "EPS16ST\0", 8) ||
+        (header.version != 1 && header.version != 2) ||
         header.header_size != sizeof(header) || header.total_size != size ||
         size != expected || header.m68k_context_size != m68k_context_size()) {
         plugin_error(error, error_size, "machine snapshot format is incompatible");
@@ -485,6 +505,13 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     PluginSnapshotReader reader = {payload, (const uint8_t *)data + size, 1};
 #define SNAPSHOT_LOAD_FIELD(name) snapshot_read(&reader, &(name), sizeof(name));
     PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_LOAD_FIELD)
+    if (header.version >= 2) {
+        PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_LOAD_FIELD)
+    } else {
+        memset(panel_indicator_on, 0, sizeof(panel_indicator_on));
+        memset(panel_indicator_flash, 0, sizeof(panel_indicator_flash));
+        panel_indicator_command_pending = 0;
+    }
 #undef SNAPSHOT_LOAD_FIELD
     snapshot_read(&reader, &es5505, sizeof(es5505));
     snapshot_read(&reader, &kpc_device, sizeof(kpc_device));
