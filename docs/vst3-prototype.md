@@ -39,6 +39,10 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   STOP/CONTINUE and PLAY mappings are visible but disabled.
 - The VFD is blank until a real KPC/OS sink publishes it. No placeholder OS
   message is inserted into the display.
+- Complete and short KPC/VFD frames are published atomically to the plug-in
+  editor. In particular, the original OS `71` recording frame clears the
+  sampling-ready `*`; the editor no longer reads the decoder's partially
+  updated character workspace.
 - ROM, KPC ROM and OS disk paths are discovered automatically from the
   external `EPS_files` folder; file selectors are intentionally absent from
   the compact rack GUI. No copyrighted image is in the source or bundle.
@@ -62,6 +66,9 @@ the verified machine is mechanically extracted from `rom_probe.c`.
 - The changing 22-character line uses compact monospaced cells anchored at the
   left edge instead of distributing the characters across the full window;
   decimal points and the original-OS cursor remain independent attributes.
+- Sampling-level meter segments are not rendered yet. Their non-character VFD
+  traffic must be decoded from the original KPC stream; the editor must not
+  synthesize a meter from DAW input amplitude.
 - The editor follows the low-profile rack-panel proportions: Volume and mode
   controls at the left, page matrix and Data Entry in the centre, a full-width
   22-cell VFD above the eight track keys, and sampling/sequencer controls at

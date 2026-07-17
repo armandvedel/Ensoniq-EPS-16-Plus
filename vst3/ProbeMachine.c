@@ -1,13 +1,29 @@
 #include "ProbeMachine.h"
 
+#include <string.h>
+
 /* Milestone bridge: compile the verified probe unchanged into a private VST
    translation unit, rename its CLI entry point, and expose only a DAW-clocked
    interface below.  This keeps live_host.c (HTTP, AudioQueue and CoreMIDI)
    out of the plug-in while the static probe state is made instance-owned in
    the next extraction step. */
+static char plugin_published_display[23] = "                      ";
+static uint32_t plugin_published_decimal_mask;
+
+static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
+                                   int cursor_start, int cursor_end) {
+    (void)cursor_start;
+    (void)cursor_end;
+    memcpy(plugin_published_display, display, 23);
+    plugin_published_decimal_mask = decimal_mask;
+}
+
+#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
+    plugin_capture_display((display), (decimal_mask), (cursor_start), (cursor_end))
 #define main eps16_probe_cli_main
 #include "../native/rom_probe.c"
 #undef main
+#undef EPS16_PANEL_DISPLAY_PUBLISHED
 
 #include "m68kcpu.h"
 
@@ -221,6 +237,9 @@ int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
     kpc_device_set_capture_clock(&kpc_device, 2, 40000);
     deterministic_host_input = 1;
     live_mode = 0;
+    memset(plugin_published_display, ' ', 22);
+    plugin_published_display[22] = '\0';
+    plugin_published_decimal_mask = 0;
 
     m68k_init();
     es5505_core_init(&es5505, es5505_sample_read, NULL);
@@ -295,6 +314,12 @@ void eps16_probe_machine_run_until(uint64_t target_cycle) {
             ++es5505_irqs;
         }
     }
+    if (panel_display_dirty &&
+        current_cycle - panel_display_last_change_cycle >= 100000) {
+        plugin_capture_display(panel_display, panel_display_decimal_mask,
+                               panel_cursor_start, panel_cursor_end);
+        panel_display_dirty = 0;
+    }
 }
 
 size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
@@ -347,12 +372,11 @@ void eps16_probe_machine_stereo_output(float *left, float *right) {
 
 void eps16_probe_machine_display(char display[23]) {
     if (!display) return;
-    memcpy(display, panel_display, 22);
-    display[22] = '\0';
+    memcpy(display, plugin_published_display, 23);
 }
 
 uint32_t eps16_probe_machine_decimal_mask(void) {
-    return panel_display_decimal_mask & 0x3fffffU;
+    return plugin_published_decimal_mask & 0x3fffffU;
 }
 
 uint16_t eps16_probe_machine_indicator_on(unsigned int bank) {
@@ -538,6 +562,11 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     restored_cpu.set_fc_callback = current_cpu.set_fc_callback;
     restored_cpu.instr_hook_callback = current_cpu.instr_hook_callback;
     m68k_set_context(&restored_cpu);
+
+    /* Version-1/2 snapshots already contain the decoder state.  Publish that
+       completed state immediately without changing the snapshot format. */
+    memcpy(plugin_published_display, panel_display, 23);
+    plugin_published_decimal_mask = panel_display_decimal_mask;
 
     es5505.sample_reader = sample_reader;
     es5505.sample_context = sample_context;

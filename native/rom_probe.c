@@ -243,6 +243,11 @@ static uint8_t panel_last_tx;
 static int panel_pick_instrument_seen;
 static int panel_file_loaded_seen;
 
+#ifndef EPS16_PANEL_DISPLAY_PUBLISHED
+#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
+    ((void)0)
+#endif
+
 static int panel_dotted_digit(uint8_t code, char *digit) {
     /* Original-OS table at CPU c0228c.  These are the KPC/VFD codes for
        decimal digits whose per-cell decimal point is lit. */
@@ -633,6 +638,8 @@ static void live_command(const char *line) {
     } else if (!strcmp(line, "quit")) {
         live_quit = 1;
     } else if (!strcmp(line, "display")) {
+        EPS16_PANEL_DISPLAY_PUBLISHED(panel_display, panel_display_decimal_mask,
+                                      panel_cursor_start, panel_cursor_end);
         live_host_display(panel_display, panel_display_decimal_mask,
                           panel_cursor_start, panel_cursor_end);
     } else {
@@ -657,6 +664,8 @@ static void live_service(void) {
        character. */
     if (panel_display_dirty &&
         current_cycle - panel_display_last_change_cycle >= 100000) {
+        EPS16_PANEL_DISPLAY_PUBLISHED(panel_display, panel_display_decimal_mask,
+                                      panel_cursor_start, panel_cursor_end);
         live_host_display(panel_display, panel_display_decimal_mask,
                           panel_cursor_start, panel_cursor_end);
         panel_display_dirty = 0;
@@ -1226,6 +1235,11 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_noncell_parameter_pending = 0;
             panel_indicator_command_pending = 0;
         } else if (value == 'f') {
+            if (panel_display_dirty)
+                EPS16_PANEL_DISPLAY_PUBLISHED(panel_display,
+                                              panel_display_decimal_mask,
+                                              panel_cursor_start,
+                                              panel_cursor_end);
             if (live_mode && panel_display_dirty)
                 live_host_display(panel_display, panel_display_decimal_mask,
                                   panel_cursor_start, panel_cursor_end);
@@ -1339,10 +1353,14 @@ static void duart_write(unsigned int address, unsigned int value) {
         /* Publish complete VFD updates atomically.  Exposing every transport
            byte makes fast hardware frames visibly crawl in a 60 Hz browser,
            even though the physical panel presents the completed field. */
-        if (live_mode &&
-            (panel_cursor >= 22 || value == 0x71 || value == 0x72)) {
-            live_host_display(panel_display, panel_display_decimal_mask,
-                              panel_cursor_start, panel_cursor_end);
+        if (panel_cursor >= 22 || value == 0x71 || value == 0x72) {
+            EPS16_PANEL_DISPLAY_PUBLISHED(panel_display,
+                                          panel_display_decimal_mask,
+                                          panel_cursor_start,
+                                          panel_cursor_end);
+            if (live_mode)
+                live_host_display(panel_display, panel_display_decimal_mask,
+                                  panel_cursor_start, panel_cursor_end);
             panel_display_dirty = 0;
         }
         if (value == 0x72 && getenv("EPS16_TRACE_DISPLAY"))

@@ -27,6 +27,14 @@ static int display_starts_with(const char *expected) {
     return !strncmp(display, expected, strlen(expected));
 }
 
+static int display_is_blank(void) {
+    char display[23];
+    eps16_probe_machine_display(display);
+    printf("cycles=%llu recording_display=|%s|\n",
+           (unsigned long long)eps16_probe_machine_cycles(), display);
+    return strspn(display, " ") == 22;
+}
+
 static void print_indicators(const char *label) {
     printf("indicators[%s]=%04x/%04x %04x/%04x %04x/%04x\n", label,
            eps16_probe_machine_indicator_on(0),
@@ -73,6 +81,9 @@ int main(int argc, char **argv) {
     print_indicators("sample-track1");
     if ((eps16_probe_machine_indicator_on(0) & 0x0101U) != 0x0101U)
         return 1;
+    if (eps16_probe_machine_indicator_on(1) ||
+        eps16_probe_machine_indicator_on(2))
+        return 1;
 
     /* The sampling level meter uses non-character VFD traffic. ENTER release
        is the original OS/KPC transition into RECORD; a later ENTER press is
@@ -83,7 +94,14 @@ int main(int argc, char **argv) {
         eps16_probe_machine_sampling_input_conversions();
     click(0x23);
     run_for(100000000);
-    display_starts_with("");
+    if (!display_is_blank()) return 1;
+    print_indicators("recording");
+    /* Bank 0 contains the loaded/selected Track LEDs. The original OS turns
+       on only the fixed REC legend (right annunciator bank, index 3) once the
+       recording transition has completed. */
+    if (eps16_probe_machine_indicator_on(1) ||
+        eps16_probe_machine_indicator_on(2) != 0x0008U)
+        return 1;
     const uint64_t recorded_bytes =
         eps16_probe_machine_sample_ram_write_bytes() - writes_before;
     const uint64_t input_conversions =
