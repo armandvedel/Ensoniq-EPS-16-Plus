@@ -117,6 +117,14 @@ void Eps16PlusProcessor::getStateInformation(juce::MemoryBlock &destination) {
     if (!machine.empty()) output.write(machine.data(), machine.size());
 }
 
+bool Eps16PlusProcessor::restoreMachineSnapshot(const void *data,
+                                                std::size_t size) {
+    const juce::ScopedLock lock(getCallbackLock());
+    if (!machineSink.restoreState(data, size)) return false;
+    bridge.resetTimeline();
+    return true;
+}
+
 void Eps16PlusProcessor::setStateInformation(const void *data, int size) {
     juce::ValueTree restoredTree;
     juce::MemoryBlock restoredMachine;

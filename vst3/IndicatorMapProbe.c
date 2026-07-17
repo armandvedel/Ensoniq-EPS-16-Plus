@@ -31,6 +31,8 @@ static void show(const char *label) {
 
 int main(int argc, char **argv) {
     if (argc != 4) return 2;
+    Eps16ProbeMachine *machine = eps16_probe_machine_create();
+    if (!machine || !eps16_probe_machine_begin(machine)) return 1;
     char error[256];
     if (!eps16_probe_machine_initialize(argv[1], argv[2], argv[3],
                                         error, sizeof(error))) {
@@ -56,5 +58,8 @@ int main(int argc, char **argv) {
         click(0x3f);
         show(pages[index].name);
     }
-    return eps16_probe_machine_illegal_instructions() ? 1 : 0;
+    const int result = eps16_probe_machine_illegal_instructions() ? 1 : 0;
+    eps16_probe_machine_end(machine);
+    eps16_probe_machine_destroy(machine);
+    return result;
 }

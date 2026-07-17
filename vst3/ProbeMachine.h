@@ -12,6 +12,9 @@ typedef struct Eps16ProbeMachine Eps16ProbeMachine;
 
 Eps16ProbeMachine *eps16_probe_machine_create(void);
 void eps16_probe_machine_destroy(Eps16ProbeMachine *machine);
+/* Selects this machine for the calling thread. All operations below must occur
+   between a successful begin/end pair. Different machines may be active on
+   different threads at the same time. */
 int eps16_probe_machine_begin(Eps16ProbeMachine *machine);
 void eps16_probe_machine_end(Eps16ProbeMachine *machine);
 

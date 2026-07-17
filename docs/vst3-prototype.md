@@ -74,19 +74,18 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   22-cell VFD above the eight track keys, and sampling/sequencer controls at
   the right. Resizing preserves the photographed rack aspect ratio.
 
-Each plug-in processor now owns a complete machine image, including CPU,
-RAM/sample RAM, KPC, ES5505, ES5510, panel, disk and audio-queue state. The
-verified file-static core is selected only for the duration of a DAW block;
-switches save the previous image and restore the requested one. A process-wide
-mutex makes simultaneous host audio threads safe. Multiple plug-in instances
-therefore boot, run, sample and save independently without changing the
-existing machine or VST-state formats.
+Each plug-in processor owns a directly addressed machine context, including
+CPU, RAM/sample RAM, KPC, ES5505, ES5510, panel, disk and audio-queue state.
+No full-machine image is copied at DAW block boundaries. The VST-specific
+Musashi build keeps only its transient execution registers in thread-local
+storage; the durable CPU context follows its EPS instance when a DAW moves a
+plug-in between worker threads.
 
-This is the conservative first instance-isolation step, not the final
-parallel-core extraction: blocks from separate EPS instances are serialized
-inside the emulator core and switching instances copies the machine image.
-The DAW may schedule the surrounding plug-in work normally, but the authentic
-cores do not yet execute simultaneously on separate CPU cores.
+There is no process-wide emulator mutex and no lock in the normal plug-in
+audio path. Separate EPS instances can execute simultaneously on separate DAW
+threads. State capture remains serialized with the same instance's callback
+through JUCE's existing callback lock. Existing version-1/version-2 machine
+snapshots and the VST state container remain byte-compatible.
 
 ## Deterministic callback contract
 
@@ -130,22 +129,10 @@ verifies it, then writes
 contains the plug-in plus an `EPS_files` sibling folder with a README, but no
 ROM, KPC ROM or OS disk.
 
-## Next milestone: parallel authentic engine extraction
+## Remaining authentic-engine work
 
-The next change should not rewrite working device behavior. It should replace
-blockwise image switching with a directly addressed, instance-owned
-`Eps16Machine` in small compiling steps:
-
-1. Separate CLI diagnostics and `live_host` calls from machine state.
-2. Make RAM, MMIO, KPC, DMA, DUART, FDC, ES5505, ES5510 and Musashi context
-   directly instance-owned. Remove all file-static machine globals and the
-   process-wide execution mutex.
-3. Expose external resource loading, physical panel bytes, MIDI bytes, stereo
-   sampling input, `runUntil(cycle)` and stereo rendering through the sink
-   implemented in this milestone.
-4. Preserve deterministic boot, original-OS display and audio regressions
-   while replacing the temporary singleton sink with the extracted machine.
-5. Keep the legacy KPC path opt-in rules from `docs/kpc-migration.md`; do not
-   delete provisional behavior until its ten acceptance tests pass.
-
-No Enhanced parameter or direct-RAM feature belongs in this extraction.
+The instance extraction is complete for the VST path. Further engine changes
+must continue to preserve deterministic boot, original-OS display, sampling,
+audio and version-1/version-2 state regressions. The legacy KPC path retains
+the opt-in rules from `docs/kpc-migration.md`; no Enhanced parameter or
+direct-RAM feature belongs in the authentic prototype.

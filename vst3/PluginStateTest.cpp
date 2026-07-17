@@ -40,10 +40,9 @@ int main(int argc, char **argv) {
         configure(processor, argv);
         processor.prepareToPlay(48000.0, 512);
         const auto raw = readFile(argv[5]);
-        char error[256]{};
-        if (raw.empty() || !eps16_probe_machine_load_state(
-                               raw.data(), raw.size(), error, sizeof(error))) {
-            std::cerr << "raw restore failed: " << error << '\n';
+        if (raw.empty() ||
+            !processor.restoreMachineSnapshot(raw.data(), raw.size())) {
+            std::cerr << "raw restore failed\n";
             return 1;
         }
         juce::MemoryBlock state;
@@ -61,19 +60,18 @@ int main(int argc, char **argv) {
     Eps16PlusProcessor processor;
     processor.setStateInformation(saved.data(), static_cast<int>(saved.size()));
     processor.prepareToPlay(48000.0, 512);
-    char display[23];
-    eps16_probe_machine_display(display);
-    if (std::string(display, 20) != "MODE=FORWARD-NO LOOP") return 1;
-    eps16_probe_machine_midi(0x80, 60, 0);
-    eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 1000000);
-    eps16_probe_machine_midi(0x90, 60, 100);
+    const auto display = processor.machineDisplay();
+    if (!display.startsWith("MODE=FORWARD-NO LOOP")) return 1;
+    juce::AudioBuffer<float> audio(2, 512);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
     float peak = 0.0f;
     for (unsigned int block = 0; block < 100; ++block) {
-        eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 100000);
-        float left = 0.0f;
-        float right = 0.0f;
-        eps16_probe_machine_stereo_output(&left, &right);
-        peak = std::max(peak, std::max(std::abs(left), std::abs(right)));
+        audio.clear();
+        processor.processBlock(audio, midi);
+        midi.clear();
+        peak = std::max(peak, std::max(audio.getMagnitude(0, 0, 512),
+                                       audio.getMagnitude(1, 0, 512)));
     }
     std::cout << "status=" << processor.machineStatus()
               << " display=|" << display << "| peak=" << peak << '\n';

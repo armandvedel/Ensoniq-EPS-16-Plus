@@ -22,6 +22,89 @@ add_library(eps16_vst3_bridge STATIC
 target_include_directories(eps16_vst3_bridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_options(eps16_vst3_bridge PRIVATE -Wall -Wextra -Wpedantic)
 
+# Musashi keeps its currently executing CPU in file globals.  The VST build
+# gives those transient registers thread-local storage; the durable context is
+# still saved in each Eps16ProbeMachine at DAW block boundaries.  The regular
+# CLI/probe targets continue to link the unmodified dependency target.
+set(EPS16_MUSASHI_TLS_DIR "${CMAKE_CURRENT_BINARY_DIR}/musashi-tls")
+file(MAKE_DIRECTORY "${EPS16_MUSASHI_TLS_DIR}")
+file(READ "${MUSASHI_DIR}/m68kcpu.c" EPS16_MUSASHI_TLS_SOURCE)
+file(READ "${MUSASHI_DIR}/m68kcpu.h" EPS16_MUSASHI_TLS_HEADER)
+foreach(declaration
+    "int  m68ki_initial_cycles;"
+    "int  m68ki_remaining_cycles = 0;"
+    "uint m68ki_tracing = 0;"
+    "uint m68ki_address_space;"
+    "m68ki_cpu_core m68ki_cpu = {0};"
+    "sigjmp_buf m68ki_aerr_trap;"
+    "jmp_buf m68ki_aerr_trap;"
+    "uint    m68ki_aerr_address;"
+    "uint    m68ki_aerr_write_mode;"
+    "uint    m68ki_aerr_fc;"
+    "jmp_buf m68ki_bus_error_jmp_buf;")
+  string(REPLACE "${declaration}" "_Thread_local ${declaration}"
+         EPS16_MUSASHI_TLS_SOURCE "${EPS16_MUSASHI_TLS_SOURCE}")
+endforeach()
+string(REPLACE "_Thread_local sig_Thread_local jmp_buf"
+       "_Thread_local sigjmp_buf"
+       EPS16_MUSASHI_TLS_SOURCE "${EPS16_MUSASHI_TLS_SOURCE}")
+foreach(declaration
+    "extern m68ki_cpu_core m68ki_cpu;"
+    "extern sint           m68ki_remaining_cycles;"
+    "extern uint           m68ki_tracing;"
+    "extern uint           m68ki_address_space;"
+    "extern uint           m68ki_aerr_address;"
+    "extern uint           m68ki_aerr_write_mode;"
+    "extern uint           m68ki_aerr_fc;"
+    "extern sigjmp_buf m68ki_aerr_trap;"
+    "extern jmp_buf m68ki_aerr_trap;"
+    "extern jmp_buf m68ki_bus_error_jmp_buf;")
+  string(REPLACE "${declaration}" "extern _Thread_local ${declaration}"
+         EPS16_MUSASHI_TLS_HEADER "${EPS16_MUSASHI_TLS_HEADER}")
+endforeach()
+# The replacement above retains the original 'extern' token; normalize it.
+string(REPLACE "extern _Thread_local extern " "extern _Thread_local "
+       EPS16_MUSASHI_TLS_HEADER "${EPS16_MUSASHI_TLS_HEADER}")
+string(REPLACE "#include \"m68kops.h\""
+       "#include <pthread.h>\n#include \"m68kops.h\""
+       EPS16_MUSASHI_TLS_SOURCE "${EPS16_MUSASHI_TLS_SOURCE}")
+string(REPLACE
+  "\tstatic uint emulation_initialized = 0;\n\n\t/* The first call to this function initializes the opcode handler jump table */\n\tif(!emulation_initialized)\n\t\t{\n\t\tm68ki_build_opcode_table();\n\t\temulation_initialized = 1;\n\t}"
+  "static pthread_once_t opcode_table_once = PTHREAD_ONCE_INIT;\n\tpthread_once(&opcode_table_once, m68ki_build_opcode_table);"
+  EPS16_MUSASHI_TLS_SOURCE "${EPS16_MUSASHI_TLS_SOURCE}")
+if(EPS16_MUSASHI_TLS_SOURCE MATCHES "static uint emulation_initialized" OR
+   NOT EPS16_MUSASHI_TLS_SOURCE MATCHES
+       "_Thread_local m68ki_cpu_core m68ki_cpu" OR
+   NOT EPS16_MUSASHI_TLS_HEADER MATCHES
+       "extern _Thread_local m68ki_cpu_core m68ki_cpu")
+  message(FATAL_ERROR "Musashi source layout is incompatible with VST TLS adaptation")
+endif()
+file(WRITE "${EPS16_MUSASHI_TLS_DIR}/m68kcpu.c"
+     "${EPS16_MUSASHI_TLS_SOURCE}")
+file(WRITE "${EPS16_MUSASHI_TLS_DIR}/m68kcpu.h"
+     "${EPS16_MUSASHI_TLS_HEADER}")
+
+add_library(musashi_vst STATIC
+  "${EPS16_MUSASHI_TLS_DIR}/m68kcpu.c"
+  "${MUSASHI_DIR}/softfloat/softfloat.c"
+  "${GENERATED_DIR}/m68kops.c"
+)
+target_compile_definitions(musashi_vst PUBLIC
+  M68K_EMULATE_FC=M68K_OPT_SPECIFY_HANDLER
+  M68K_EMULATE_INT_ACK=M68K_OPT_ON
+  M68K_INSTRUCTION_HOOK=M68K_OPT_ON
+)
+target_compile_options(musashi_vst PUBLIC
+  "-include${CMAKE_SOURCE_DIR}/native/musashi_config.h"
+)
+target_include_directories(musashi_vst PUBLIC
+  "${EPS16_MUSASHI_TLS_DIR}"
+  "${MUSASHI_DIR}"
+  "${MUSASHI_DIR}/softfloat"
+  "${GENERATED_DIR}"
+)
+target_link_libraries(musashi_vst PUBLIC m pthread)
+
 add_library(eps16_probe_machine STATIC
   ProbeMachine.c
   ProbeMachine.h
@@ -37,7 +120,7 @@ target_include_directories(eps16_probe_machine PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_SOURCE_DIR}/native"
 )
-target_link_libraries(eps16_probe_machine PUBLIC musashi)
+target_link_libraries(eps16_probe_machine PUBLIC musashi_vst)
 
 juce_add_plugin(Eps16Plus
   COMPANY_NAME "EPS-16 Plus Emulator"

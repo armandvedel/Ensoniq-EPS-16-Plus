@@ -2,49 +2,79 @@
 
 #include <string.h>
 
-/* Milestone bridge: compile the verified probe unchanged into a private VST
-   translation unit, rename its CLI entry point, and expose only a DAW-clocked
-   interface below.  This keeps live_host.c (HTTP, AudioQueue and CoreMIDI)
-   out of the plug-in while the static probe state is made instance-owned in
-   the next extraction step. */
-static char plugin_published_display[23] = "                      ";
-static uint32_t plugin_published_decimal_mask;
-
+/* Compile the verified probe into the private VST translation unit while
+   selecting an explicit core context for every plug-in instance. */
 static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
-                                   int cursor_start, int cursor_end) {
-    (void)cursor_start;
-    (void)cursor_end;
-    memcpy(plugin_published_display, display, 23);
-    plugin_published_decimal_mask = decimal_mask;
-}
+                                   int cursor_start, int cursor_end);
 
 #define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
     plugin_capture_display((display), (decimal_mask), (cursor_start), (cursor_end))
+#define EPS16_ROM_PROBE_CONTEXT 1
 #define main eps16_probe_cli_main
 #include "../native/rom_probe.c"
 #undef main
+#undef EPS16_ROM_PROBE_CONTEXT
 #undef EPS16_PANEL_DISPLAY_PUBLISHED
 
 #include "m68kcpu.h"
 
 #include <math.h>
-#include <pthread.h>
 
-static int plugin_initialized;
-static uint64_t plugin_executed;
-static uint64_t plugin_audio_scheduled_cycle;
-static uint64_t plugin_audio_cycle_accumulator;
-static unsigned int plugin_timer_irqs;
-static int16_t plugin_input_sample;
-static int plugin_input_valid;
-static float plugin_output_left;
-static float plugin_output_right;
 enum { PLUGIN_AUDIO_QUEUE_CAPACITY = 1024 };
-static Eps16ProbeAudioFrame plugin_audio_queue[PLUGIN_AUDIO_QUEUE_CAPACITY];
-static size_t plugin_audio_queue_read;
-static size_t plugin_audio_queue_write;
-static uint8_t plugin_panel_pair[2];
-static size_t plugin_panel_pair_count;
+
+typedef struct {
+    int initialized;
+    uint64_t executed;
+    uint64_t audio_scheduled_cycle;
+    uint64_t audio_cycle_accumulator;
+    unsigned int timer_irqs;
+    int16_t input_sample;
+    int input_valid;
+    float output_left, output_right;
+    Eps16ProbeAudioFrame audio_queue[PLUGIN_AUDIO_QUEUE_CAPACITY];
+    size_t audio_queue_read, audio_queue_write;
+    uint8_t panel_pair[2];
+    size_t panel_pair_count;
+    char published_display[23];
+    uint32_t published_decimal_mask;
+} PluginRuntimeState;
+
+struct Eps16ProbeMachine {
+    RomProbeState core;
+    PluginRuntimeState plugin;
+    m68ki_cpu_core cpu;
+};
+
+static _Thread_local Eps16ProbeMachine *plugin_current_machine;
+
+#define plugin_initialized (plugin_current_machine->plugin.initialized)
+#define plugin_executed (plugin_current_machine->plugin.executed)
+#define plugin_audio_scheduled_cycle \
+    (plugin_current_machine->plugin.audio_scheduled_cycle)
+#define plugin_audio_cycle_accumulator \
+    (plugin_current_machine->plugin.audio_cycle_accumulator)
+#define plugin_timer_irqs (plugin_current_machine->plugin.timer_irqs)
+#define plugin_input_sample (plugin_current_machine->plugin.input_sample)
+#define plugin_input_valid (plugin_current_machine->plugin.input_valid)
+#define plugin_output_left (plugin_current_machine->plugin.output_left)
+#define plugin_output_right (plugin_current_machine->plugin.output_right)
+#define plugin_audio_queue (plugin_current_machine->plugin.audio_queue)
+#define plugin_audio_queue_read (plugin_current_machine->plugin.audio_queue_read)
+#define plugin_audio_queue_write (plugin_current_machine->plugin.audio_queue_write)
+#define plugin_panel_pair (plugin_current_machine->plugin.panel_pair)
+#define plugin_panel_pair_count (plugin_current_machine->plugin.panel_pair_count)
+#define plugin_published_display (plugin_current_machine->plugin.published_display)
+#define plugin_published_decimal_mask \
+    (plugin_current_machine->plugin.published_decimal_mask)
+
+static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
+                                   int cursor_start, int cursor_end) {
+    (void)cursor_start;
+    (void)cursor_end;
+    if (!plugin_current_machine) return;
+    memcpy(plugin_published_display, display, 23);
+    plugin_published_decimal_mask = decimal_mask;
+}
 
 #define PLUGIN_SNAPSHOT_FIELDS(X) \
     X(low_ram) X(sample_ram) X(sample_ram_write_bytes) X(os_ram) \
@@ -96,124 +126,33 @@ static size_t plugin_panel_pair_count;
     X(panel_indicator_on) X(panel_indicator_flash) \
     X(panel_indicator_command_pending)
 
-/* The verified core is still compiled from rom_probe.c, but every plug-in
-   instance owns a complete image of its functional machine state. The active
-   image is selected only at DAW block boundaries, so the existing CPU and
-   device code remains byte-for-byte unchanged inside a block. */
-typedef struct {
-#define INSTANCE_FIELD(name) __typeof__(name) name;
-    PLUGIN_SNAPSHOT_FIELDS(INSTANCE_FIELD)
-    PLUGIN_SNAPSHOT_V2_FIELDS(INSTANCE_FIELD)
-#undef INSTANCE_FIELD
-    __typeof__(rom) rom;
-    __typeof__(es5505) es5505;
-    __typeof__(kpc_device) kpc_device;
-    __typeof__(plugin_published_display) plugin_published_display;
-    __typeof__(plugin_published_decimal_mask) plugin_published_decimal_mask;
-    __typeof__(plugin_audio_queue) plugin_audio_queue;
-    __typeof__(plugin_audio_queue_read) plugin_audio_queue_read;
-    __typeof__(plugin_audio_queue_write) plugin_audio_queue_write;
-    __typeof__(plugin_initialized) plugin_initialized;
-    m68ki_cpu_core cpu;
-    int64_t fdc_data_offset;
-} PluginMachineImage;
-
-struct Eps16ProbeMachine {
-    PluginMachineImage image;
-};
-
-static pthread_mutex_t plugin_instance_mutex = PTHREAD_MUTEX_INITIALIZER;
-static Eps16ProbeMachine *plugin_active_instance;
-static PluginMachineImage plugin_initial_image;
-static int plugin_initial_image_ready;
-
-static void plugin_capture_machine_image(PluginMachineImage *image) {
-#define CAPTURE_INSTANCE_FIELD(name) \
-    memcpy(&image->name, &name, sizeof(name));
-    PLUGIN_SNAPSHOT_FIELDS(CAPTURE_INSTANCE_FIELD)
-    PLUGIN_SNAPSHOT_V2_FIELDS(CAPTURE_INSTANCE_FIELD)
-#undef CAPTURE_INSTANCE_FIELD
-    memcpy(&image->rom, &rom, sizeof(rom));
-    memcpy(&image->es5505, &es5505, sizeof(es5505));
-    memcpy(&image->kpc_device, &kpc_device, sizeof(kpc_device));
-    memcpy(&image->plugin_published_display, &plugin_published_display,
-           sizeof(plugin_published_display));
-    image->plugin_published_decimal_mask = plugin_published_decimal_mask;
-    memcpy(&image->plugin_audio_queue, &plugin_audio_queue,
-           sizeof(plugin_audio_queue));
-    image->plugin_audio_queue_read = plugin_audio_queue_read;
-    image->plugin_audio_queue_write = plugin_audio_queue_write;
-    image->plugin_initialized = plugin_initialized;
-    image->fdc_data_offset = -1;
-    if (fdc_data) {
-        const uintptr_t pointer = (uintptr_t)fdc_data;
-        const uintptr_t beginning = (uintptr_t)disk_image;
-        const uintptr_t end = beginning + sizeof(disk_image);
-        if (pointer >= beginning && pointer < end)
-            image->fdc_data_offset = (int64_t)(pointer - beginning);
-    }
-    m68k_get_context(&image->cpu);
-}
-
-static void plugin_restore_machine_image(const PluginMachineImage *image) {
-#define RESTORE_INSTANCE_FIELD(name) \
-    memcpy(&name, &image->name, sizeof(name));
-    PLUGIN_SNAPSHOT_FIELDS(RESTORE_INSTANCE_FIELD)
-    PLUGIN_SNAPSHOT_V2_FIELDS(RESTORE_INSTANCE_FIELD)
-#undef RESTORE_INSTANCE_FIELD
-    memcpy(&rom, &image->rom, sizeof(rom));
-    memcpy(&es5505, &image->es5505, sizeof(es5505));
-    memcpy(&kpc_device, &image->kpc_device, sizeof(kpc_device));
-    memcpy(&plugin_published_display, &image->plugin_published_display,
-           sizeof(plugin_published_display));
-    plugin_published_decimal_mask = image->plugin_published_decimal_mask;
-    memcpy(&plugin_audio_queue, &image->plugin_audio_queue,
-           sizeof(plugin_audio_queue));
-    plugin_audio_queue_read = image->plugin_audio_queue_read;
-    plugin_audio_queue_write = image->plugin_audio_queue_write;
-    plugin_initialized = image->plugin_initialized;
-    fdc_data = image->fdc_data_offset >= 0
-                   ? disk_image + image->fdc_data_offset : NULL;
-    m68k_set_context((void *)&image->cpu);
-}
-
 Eps16ProbeMachine *eps16_probe_machine_create(void) {
     Eps16ProbeMachine *machine = calloc(1, sizeof(*machine));
     if (!machine) return NULL;
-    pthread_mutex_lock(&plugin_instance_mutex);
-    if (!plugin_initial_image_ready) {
-        plugin_capture_machine_image(&plugin_initial_image);
-        plugin_initial_image_ready = 1;
-    }
-    memcpy(&machine->image, &plugin_initial_image,
-           sizeof(plugin_initial_image));
-    pthread_mutex_unlock(&plugin_instance_mutex);
+    rom_probe_state_defaults(&machine->core);
+    memset(machine->plugin.published_display, ' ', 22);
+    machine->plugin.published_display[22] = '\0';
     return machine;
 }
 
 void eps16_probe_machine_destroy(Eps16ProbeMachine *machine) {
     if (!machine) return;
-    pthread_mutex_lock(&plugin_instance_mutex);
-    if (plugin_active_instance == machine) plugin_active_instance = NULL;
-    pthread_mutex_unlock(&plugin_instance_mutex);
     free(machine);
 }
 
 int eps16_probe_machine_begin(Eps16ProbeMachine *machine) {
-    if (!machine) return 0;
-    pthread_mutex_lock(&plugin_instance_mutex);
-    if (plugin_active_instance != machine) {
-        if (plugin_active_instance)
-            plugin_capture_machine_image(&plugin_active_instance->image);
-        plugin_restore_machine_image(&machine->image);
-        plugin_active_instance = machine;
-    }
+    if (!machine || plugin_current_machine) return 0;
+    plugin_current_machine = machine;
+    rom_probe_state = &machine->core;
+    m68k_set_context(&machine->cpu);
     return 1;
 }
 
 void eps16_probe_machine_end(Eps16ProbeMachine *machine) {
-    (void)machine;
-    pthread_mutex_unlock(&plugin_instance_mutex);
+    if (!machine || plugin_current_machine != machine) return;
+    m68k_get_context(&machine->cpu);
+    rom_probe_state = NULL;
+    plugin_current_machine = NULL;
 }
 
 typedef struct {

@@ -33,6 +33,7 @@ public:
 
     void getStateInformation(juce::MemoryBlock &) override;
     void setStateInformation(const void *, int) override;
+    bool restoreMachineSnapshot(const void *data, std::size_t size);
 
     bool enqueuePanelTransition(std::uint8_t code, bool pressed) {
         return bridge.enqueuePanelTransition(code, pressed);

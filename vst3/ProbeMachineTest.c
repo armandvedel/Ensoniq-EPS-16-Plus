@@ -51,6 +51,8 @@ int main(int argc, char **argv) {
                 argv[0]);
         return 2;
     }
+    Eps16ProbeMachine *machine = eps16_probe_machine_create();
+    if (!machine || !eps16_probe_machine_begin(machine)) return 1;
     char error[256];
     if (!eps16_probe_machine_initialize(argv[1], argv[2], argv[3],
                                         error, sizeof(error))) {
@@ -188,5 +190,7 @@ int main(int argc, char **argv) {
            (unsigned long long)saved_cycle);
     eps16_probe_machine_midi(0x80, 60, 0);
     run_for(1000000);
+    eps16_probe_machine_end(machine);
+    eps16_probe_machine_destroy(machine);
     return 0;
 }

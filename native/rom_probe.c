@@ -66,14 +66,360 @@ typedef struct {
     uint8_t direction;
 } PanelTrace;
 
-static uint8_t low_ram[LOW_RAM_SIZE];
-static uint8_t sample_ram[SAMPLE_RAM_SIZE];
-static uint64_t sample_ram_write_bytes;
-static uint8_t os_ram[OS_RAM_SIZE];
-static uint8_t rom[ROM_SIZE];
-static Es5505Core es5505;
-static uint64_t es5505_writes;
-static Es5510Core es5510;
+typedef struct { uint64_t cycle; uint8_t value; } PanelWireByte;
+
+typedef struct {
+    long long cycle;
+    uint32_t pc;
+    uint8_t kind;
+    uint8_t channel;
+    uint8_t reg;
+    uint8_t value;
+} DmaTrace;
+
+typedef struct {
+    uint8_t command;
+    uint8_t track;
+    uint8_t sector;
+    uint8_t side;
+    unsigned int block;
+    uint32_t destination;
+} FdcEvent;
+
+typedef struct { long long cycle; uint32_t pc; uint8_t level; uint8_t vector; } IrqTrace;
+
+typedef struct {
+    long long cycle;
+    uint32_t pc;
+    uint16_t opcode;
+} IllegalInstruction;
+
+enum { KPC_PHYSICAL_QUEUE_SIZE = 256 };
+
+/* All mutable probe state lives behind one explicit context.  The standalone
+   probe uses the default context below; the VST wrapper selects one context
+   per plug-in instance before entering the core. */
+typedef struct {
+    uint8_t low_ram[LOW_RAM_SIZE];
+    uint8_t sample_ram[SAMPLE_RAM_SIZE];
+    uint64_t sample_ram_write_bytes;
+    uint8_t os_ram[OS_RAM_SIZE];
+    uint8_t rom[ROM_SIZE];
+    Es5505Core es5505;
+    uint64_t es5505_writes;
+    Es5510Core es5510;
+    uint32_t es5510_gpr_latch;
+    uint64_t es5510_instruction_latch;
+    uint32_t es5510_dil_latch, es5510_dol_latch, es5510_dadr_latch;
+    uint8_t es5510_ram_read;
+    unsigned int es5510_dram_reads, es5510_dram_writes, es5510_gpr_writes;
+    unsigned int es5510_instruction_writes;
+    uint8_t es5510_host_serial;
+    unsigned int es5510_host_serial_writes;
+    int es5510_host_upload_active;
+    uint64_t es5510_host_access_until;
+    int live_mode, deterministic_host_input;
+    uint64_t es5510_input_next_cycle, es5510_input_next_time_ns;
+    uint64_t es5510_input_last_poll_time_ns, es5510_input_last_poll_cycle;
+    uint64_t es5510_input_polls, es5510_input_valid, es5510_input_bypass;
+    uint64_t sample_record_input_valid_start, sample_record_write_start;
+    unsigned int function_code;
+    uint8_t duart_registers[16];
+    uint8_t panel_rx[PANEL_RX_SIZE];
+    size_t panel_rx_read, panel_rx_write, panel_rx_count, panel_rx_consumed;
+    PanelWireByte panel_wire[PANEL_WIRE_SIZE];
+    size_t panel_wire_read, panel_wire_write, panel_wire_count;
+    uint64_t panel_wire_tail_cycle;
+    uint8_t panel_tx[1024];
+    size_t panel_tx_count;
+    PanelTrace panel_trace[PANEL_TRACE_SIZE];
+    size_t panel_trace_count;
+    long long current_cycle;
+    char panel_display[23];
+    uint32_t panel_display_decimal_mask;
+    int panel_display_dirty;
+    long long panel_display_last_change_cycle;
+    size_t panel_cursor;
+    int panel_cursor_start, panel_cursor_end, panel_cursor_active;
+    int panel_cursor_width_pending, panel_cursor_width_known;
+    int panel_noncell_parameter_pending;
+    uint16_t panel_indicator_on[3], panel_indicator_flash[3];
+    uint8_t panel_indicator_command_pending, panel_last_tx;
+    int panel_pick_instrument_seen, panel_file_loaded_seen;
+    uint8_t disk_image[DISK_SIZE];
+    int disk_loaded, disk_change_pending;
+    uint8_t fdc_track, fdc_physical_track, fdc_sector, fdc_data_register;
+    uint8_t fdc_last_command;
+    int load_trace_enabled, fdc_step_direction;
+    const uint8_t *fdc_data;
+    size_t fdc_remaining;
+    unsigned int fdc_data_reads;
+    uint32_t fdc_read_pcs[16];
+    size_t fdc_read_pc_count;
+    unsigned int duart_output;
+    int duart_tx_a_enabled, duart_tx_a_ready;
+    uint64_t duart_tx_a_ready_cycle;
+    int duart_tx_b_enabled, duart_tx_b_ready;
+    uint64_t duart_tx_b_ready_cycle;
+    uint8_t midi_tx[256];
+    size_t midi_tx_count;
+    uint16_t analog_values[8];
+    unsigned int analog_reads[8];
+    int duart_timer_pending, duart_timer_running;
+    uint64_t duart_timer_next_cycle;
+    unsigned int fdc_reads;
+    uint8_t dmac_registers[4][0x40];
+    int dmac_irq_channel;
+    unsigned int dmac_transfers;
+    int dmac_pcl_level[4];
+    DmaTrace dma_trace[256];
+    size_t dma_trace_count;
+    FdcEvent fdc_events[256];
+    size_t fdc_event_count;
+    Trace traces[MAX_TRACES];
+    size_t trace_count;
+    uint32_t postboot_pc_counts[ROM_SIZE / 2];
+    uint32_t postboot_os_pc_counts[OS_RAM_SIZE / 2];
+    uint64_t postboot_instruction_count, postboot_rom_instructions;
+    uint64_t postboot_low_ram_instructions, postboot_sample_ram_instructions;
+    uint64_t postboot_os_ram_instructions, postboot_other_instructions;
+    uint32_t pc_ring[64];
+    size_t pc_ring_position;
+    uint32_t fatal_history[64];
+    int fatal_history_captured;
+    uint32_t es5510_verify_d1, es5510_verify_d2, es5510_verify_d3;
+    uint32_t es5510_verify_a3, es5510_verify_a6;
+    uint8_t es5510_verify_actual;
+    unsigned int es5510_verify_failures;
+    uint64_t audio_frames;
+    int32_t audio_peak, es5505_bus_peak[ES5505_STEREO_BUSES];
+    int32_t es5510_return_peak;
+    unsigned int es5505_irqs;
+    IrqTrace irq_trace[128];
+    size_t irq_trace_count;
+    KpcLegacy kpc;
+    KpcFirmware kpc_firmware;
+    KpcDevice kpc_device;
+    int kpc_firmware_execution, kpc_firmware_failure_reported;
+    uint8_t kpc_physical_queue[KPC_PHYSICAL_QUEUE_SIZE];
+    size_t kpc_physical_queue_read, kpc_physical_queue_write;
+    size_t kpc_physical_queue_count;
+    uint8_t kpc_physical_expected;
+    int kpc_physical_active, kpc_physical_saw_code;
+    uint64_t kpc_physical_next_cycle;
+    uint8_t display_trace_bytes[256];
+    size_t display_trace_byte_count;
+    IllegalInstruction illegal_instructions[16];
+    size_t illegal_instruction_count;
+    int live_quit;
+    uint64_t live_press_cycle[128];
+    int sampling_enter_pending;
+    uint64_t sampling_enter_release_cycle;
+    int sampling_recording_active;
+    uint64_t button_dispatch_trace_until;
+    unsigned int button_dispatch_trace_lines;
+    uint32_t sample_live_current_pc;
+    unsigned int sample_live_bus_trace_lines;
+    FILE *sample_live_trace;
+    PanelWireByte kept_wire[PANEL_WIRE_SIZE];
+    uint8_t kept_rx[PANEL_RX_SIZE];
+    unsigned int es5505_port_trace_count;
+    int es5505_trace_writes;
+    long long es5505_trace_start_cycle;
+} RomProbeState;
+
+#ifdef EPS16_ROM_PROBE_CONTEXT
+static _Thread_local RomProbeState *rom_probe_state;
+#else
+static RomProbeState rom_probe_default_state;
+static RomProbeState *rom_probe_state = &rom_probe_default_state;
+#endif
+
+static void rom_probe_state_defaults(RomProbeState *state) {
+    memset(state, 0, sizeof(*state));
+    memset(state->panel_display, ' ', 22);
+    state->panel_display[22] = '\0';
+    state->panel_cursor_start = -1;
+    state->panel_cursor_end = -1;
+    state->fdc_step_direction = 1;
+    state->duart_tx_a_ready = 1;
+    state->duart_tx_b_ready = 1;
+    state->analog_values[0] = 0x7fc0;
+    state->analog_values[1] = 0x0000;
+    state->analog_values[2] = 0xffc0;
+    state->analog_values[3] = 0x5980;
+    state->analog_values[4] = 0xffc0;
+    state->analog_values[5] = 0xffc0;
+    state->analog_values[6] = 0x7fc0;
+    state->analog_values[7] = 0x5540;
+    state->dmac_irq_channel = -1;
+    for (unsigned int channel = 0; channel < 4; ++channel)
+        state->dmac_pcl_level[channel] = 1;
+    state->es5505_trace_writes = -1;
+}
+
+#define RP(name) (rom_probe_state->name)
+#define low_ram RP(low_ram)
+#define sample_ram RP(sample_ram)
+#define sample_ram_write_bytes RP(sample_ram_write_bytes)
+#define os_ram RP(os_ram)
+#define rom RP(rom)
+#define es5505 RP(es5505)
+#define es5505_writes RP(es5505_writes)
+#define es5510 RP(es5510)
+#define es5510_gpr_latch RP(es5510_gpr_latch)
+#define es5510_instruction_latch RP(es5510_instruction_latch)
+#define es5510_dil_latch RP(es5510_dil_latch)
+#define es5510_dol_latch RP(es5510_dol_latch)
+#define es5510_dadr_latch RP(es5510_dadr_latch)
+#define es5510_ram_read RP(es5510_ram_read)
+#define es5510_dram_reads RP(es5510_dram_reads)
+#define es5510_dram_writes RP(es5510_dram_writes)
+#define es5510_gpr_writes RP(es5510_gpr_writes)
+#define es5510_instruction_writes RP(es5510_instruction_writes)
+#define es5510_host_serial RP(es5510_host_serial)
+#define es5510_host_serial_writes RP(es5510_host_serial_writes)
+#define es5510_host_upload_active RP(es5510_host_upload_active)
+#define es5510_host_access_until RP(es5510_host_access_until)
+#define live_mode RP(live_mode)
+#define deterministic_host_input RP(deterministic_host_input)
+#define es5510_input_next_cycle RP(es5510_input_next_cycle)
+#define es5510_input_next_time_ns RP(es5510_input_next_time_ns)
+#define es5510_input_last_poll_time_ns RP(es5510_input_last_poll_time_ns)
+#define es5510_input_last_poll_cycle RP(es5510_input_last_poll_cycle)
+#define es5510_input_polls RP(es5510_input_polls)
+#define es5510_input_valid RP(es5510_input_valid)
+#define es5510_input_bypass RP(es5510_input_bypass)
+#define sample_record_input_valid_start RP(sample_record_input_valid_start)
+#define sample_record_write_start RP(sample_record_write_start)
+#define function_code RP(function_code)
+#define duart_registers RP(duart_registers)
+#define panel_rx RP(panel_rx)
+#define panel_rx_read RP(panel_rx_read)
+#define panel_rx_write RP(panel_rx_write)
+#define panel_rx_count RP(panel_rx_count)
+#define panel_rx_consumed RP(panel_rx_consumed)
+#define panel_wire RP(panel_wire)
+#define panel_wire_read RP(panel_wire_read)
+#define panel_wire_write RP(panel_wire_write)
+#define panel_wire_count RP(panel_wire_count)
+#define panel_wire_tail_cycle RP(panel_wire_tail_cycle)
+#define panel_tx RP(panel_tx)
+#define panel_tx_count RP(panel_tx_count)
+#define panel_trace RP(panel_trace)
+#define panel_trace_count RP(panel_trace_count)
+#define current_cycle RP(current_cycle)
+#define panel_display RP(panel_display)
+#define panel_display_decimal_mask RP(panel_display_decimal_mask)
+#define panel_display_dirty RP(panel_display_dirty)
+#define panel_display_last_change_cycle RP(panel_display_last_change_cycle)
+#define panel_cursor RP(panel_cursor)
+#define panel_cursor_start RP(panel_cursor_start)
+#define panel_cursor_end RP(panel_cursor_end)
+#define panel_cursor_active RP(panel_cursor_active)
+#define panel_cursor_width_pending RP(panel_cursor_width_pending)
+#define panel_cursor_width_known RP(panel_cursor_width_known)
+#define panel_noncell_parameter_pending RP(panel_noncell_parameter_pending)
+#define panel_indicator_on RP(panel_indicator_on)
+#define panel_indicator_flash RP(panel_indicator_flash)
+#define panel_indicator_command_pending RP(panel_indicator_command_pending)
+#define panel_last_tx RP(panel_last_tx)
+#define panel_pick_instrument_seen RP(panel_pick_instrument_seen)
+#define panel_file_loaded_seen RP(panel_file_loaded_seen)
+#define disk_image RP(disk_image)
+#define disk_loaded RP(disk_loaded)
+#define disk_change_pending RP(disk_change_pending)
+#define fdc_track RP(fdc_track)
+#define fdc_physical_track RP(fdc_physical_track)
+#define fdc_sector RP(fdc_sector)
+#define fdc_data_register RP(fdc_data_register)
+#define fdc_last_command RP(fdc_last_command)
+#define load_trace_enabled RP(load_trace_enabled)
+#define fdc_step_direction RP(fdc_step_direction)
+#define fdc_data RP(fdc_data)
+#define fdc_remaining RP(fdc_remaining)
+#define fdc_data_reads RP(fdc_data_reads)
+#define fdc_read_pcs RP(fdc_read_pcs)
+#define fdc_read_pc_count RP(fdc_read_pc_count)
+#define duart_output RP(duart_output)
+#define duart_tx_a_enabled RP(duart_tx_a_enabled)
+#define duart_tx_a_ready RP(duart_tx_a_ready)
+#define duart_tx_a_ready_cycle RP(duart_tx_a_ready_cycle)
+#define duart_tx_b_enabled RP(duart_tx_b_enabled)
+#define duart_tx_b_ready RP(duart_tx_b_ready)
+#define duart_tx_b_ready_cycle RP(duart_tx_b_ready_cycle)
+#define midi_tx RP(midi_tx)
+#define midi_tx_count RP(midi_tx_count)
+#define analog_values RP(analog_values)
+#define analog_reads RP(analog_reads)
+#define duart_timer_pending RP(duart_timer_pending)
+#define duart_timer_running RP(duart_timer_running)
+#define duart_timer_next_cycle RP(duart_timer_next_cycle)
+#define fdc_reads RP(fdc_reads)
+#define dmac_registers RP(dmac_registers)
+#define dmac_irq_channel RP(dmac_irq_channel)
+#define dmac_transfers RP(dmac_transfers)
+#define dmac_pcl_level RP(dmac_pcl_level)
+#define dma_trace RP(dma_trace)
+#define dma_trace_count RP(dma_trace_count)
+#define fdc_events RP(fdc_events)
+#define fdc_event_count RP(fdc_event_count)
+#define traces RP(traces)
+#define trace_count RP(trace_count)
+#define postboot_pc_counts RP(postboot_pc_counts)
+#define postboot_os_pc_counts RP(postboot_os_pc_counts)
+#define postboot_instruction_count RP(postboot_instruction_count)
+#define postboot_rom_instructions RP(postboot_rom_instructions)
+#define postboot_low_ram_instructions RP(postboot_low_ram_instructions)
+#define postboot_sample_ram_instructions RP(postboot_sample_ram_instructions)
+#define postboot_os_ram_instructions RP(postboot_os_ram_instructions)
+#define postboot_other_instructions RP(postboot_other_instructions)
+#define pc_ring RP(pc_ring)
+#define pc_ring_position RP(pc_ring_position)
+#define fatal_history RP(fatal_history)
+#define fatal_history_captured RP(fatal_history_captured)
+#define es5510_verify_d1 RP(es5510_verify_d1)
+#define es5510_verify_d2 RP(es5510_verify_d2)
+#define es5510_verify_d3 RP(es5510_verify_d3)
+#define es5510_verify_a3 RP(es5510_verify_a3)
+#define es5510_verify_a6 RP(es5510_verify_a6)
+#define es5510_verify_actual RP(es5510_verify_actual)
+#define es5510_verify_failures RP(es5510_verify_failures)
+#define audio_frames RP(audio_frames)
+#define audio_peak RP(audio_peak)
+#define es5505_bus_peak RP(es5505_bus_peak)
+#define es5510_return_peak RP(es5510_return_peak)
+#define es5505_irqs RP(es5505_irqs)
+#define irq_trace RP(irq_trace)
+#define irq_trace_count RP(irq_trace_count)
+#define kpc RP(kpc)
+#define kpc_firmware RP(kpc_firmware)
+#define kpc_device RP(kpc_device)
+#define kpc_firmware_execution RP(kpc_firmware_execution)
+#define kpc_firmware_failure_reported RP(kpc_firmware_failure_reported)
+#define kpc_physical_queue RP(kpc_physical_queue)
+#define kpc_physical_queue_read RP(kpc_physical_queue_read)
+#define kpc_physical_queue_write RP(kpc_physical_queue_write)
+#define kpc_physical_queue_count RP(kpc_physical_queue_count)
+#define kpc_physical_expected RP(kpc_physical_expected)
+#define kpc_physical_active RP(kpc_physical_active)
+#define kpc_physical_saw_code RP(kpc_physical_saw_code)
+#define kpc_physical_next_cycle RP(kpc_physical_next_cycle)
+#define display_trace_bytes RP(display_trace_bytes)
+#define display_trace_byte_count RP(display_trace_byte_count)
+#define illegal_instructions RP(illegal_instructions)
+#define illegal_instruction_count RP(illegal_instruction_count)
+#define live_quit RP(live_quit)
+#define live_press_cycle RP(live_press_cycle)
+#define sampling_enter_pending RP(sampling_enter_pending)
+#define sampling_enter_release_cycle RP(sampling_enter_release_cycle)
+#define sampling_recording_active RP(sampling_recording_active)
+#define button_dispatch_trace_until RP(button_dispatch_trace_until)
+#define button_dispatch_trace_lines RP(button_dispatch_trace_lines)
+#define sample_live_current_pc RP(sample_live_current_pc)
+#define sample_live_bus_trace_lines RP(sample_live_bus_trace_lines)
+#define sample_live_trace RP(sample_live_trace)
+
 #define es5510_gpr es5510.gpr
 #define es5510_instruction es5510.instruction
 #define es5510_dram es5510.dram
@@ -84,35 +430,9 @@ static Es5510Core es5510;
 #define es5510_sigreg es5510.sigreg
 #define es5510_ccr es5510.ccr
 #define es5510_cmr es5510.cmr
-static uint32_t es5510_gpr_latch;
-static uint64_t es5510_instruction_latch;
-static uint32_t es5510_dil_latch;
-static uint32_t es5510_dol_latch;
-static uint32_t es5510_dadr_latch;
-static uint8_t es5510_ram_read;
-static unsigned int es5510_dram_reads;
-static unsigned int es5510_dram_writes;
-static unsigned int es5510_gpr_writes;
-static unsigned int es5510_instruction_writes;
-static uint8_t es5510_host_serial;
-static unsigned int es5510_host_serial_writes;
-static int es5510_host_upload_active;
-static uint64_t es5510_host_access_until;
-static int live_mode;
 /* A plug-in host supplies input from the DAW callback while retaining the
    offline probe's emulated-cycle ADC pacing.  The normal CLI/live modes leave
    this disabled. */
-static int deterministic_host_input;
-static uint64_t es5510_input_next_cycle;
-static uint64_t es5510_input_next_time_ns;
-static uint64_t es5510_input_last_poll_time_ns;
-static uint64_t es5510_input_last_poll_cycle;
-static uint64_t es5510_input_polls;
-static uint64_t es5510_input_valid;
-static uint64_t es5510_input_bypass;
-static uint64_t sample_record_input_valid_start;
-static uint64_t sample_record_write_start;
-
 static uint64_t bus_cycle_now(void);
 
 static uint64_t monotonic_time_ns(void) {
@@ -203,46 +523,10 @@ static void es5510_write_register(uint8_t index, uint32_t value) {
     }
     es5510_core_write_reg(&es5510, index, value);
 }
-static unsigned int function_code;
-static uint8_t duart_registers[16];
-static uint8_t panel_rx[PANEL_RX_SIZE];
-static size_t panel_rx_read;
-static size_t panel_rx_write;
-static size_t panel_rx_count;
-static size_t panel_rx_consumed;
-typedef struct { uint64_t cycle; uint8_t value; } PanelWireByte;
-static PanelWireByte panel_wire[PANEL_WIRE_SIZE];
-static size_t panel_wire_read;
-static size_t panel_wire_write;
-static size_t panel_wire_count;
-static uint64_t panel_wire_tail_cycle;
-static uint8_t panel_tx[1024];
-static size_t panel_tx_count;
-static PanelTrace panel_trace[PANEL_TRACE_SIZE];
-static size_t panel_trace_count;
-static long long current_cycle;
-static char panel_display[23] = "                      ";
-static uint32_t panel_display_decimal_mask;
-static int panel_display_dirty;
-static long long panel_display_last_change_cycle;
-static size_t panel_cursor;
-static int panel_cursor_start = -1;
-static int panel_cursor_end = -1;
-static int panel_cursor_active;
-static int panel_cursor_width_pending;
-static int panel_cursor_width_known;
-static int panel_noncell_parameter_pending;
 /* The keypad/display protocol has three independently-addressed 16-way lamp
    banks. 74/75/76 select slot LED off/on/flash; 77/78/79 and 7a/7b/7c select
    display annunciator on/off/flash. The next byte is the physical index.
    Keeping the raw banks preserves original OS/KPC ownership of every lamp. */
-static uint16_t panel_indicator_on[3];
-static uint16_t panel_indicator_flash[3];
-static uint8_t panel_indicator_command_pending;
-static uint8_t panel_last_tx;
-static int panel_pick_instrument_seen;
-static int panel_file_loaded_seen;
-
 #ifndef EPS16_PANEL_DISPLAY_PUBLISHED
 #define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
     ((void)0)
@@ -262,131 +546,6 @@ static int panel_dotted_digit(uint8_t code, char *digit) {
     }
     return 0;
 }
-static uint8_t disk_image[DISK_SIZE];
-static int disk_loaded;
-static int disk_change_pending;
-static uint8_t fdc_track;
-static uint8_t fdc_physical_track;
-static uint8_t fdc_sector;
-static uint8_t fdc_data_register;
-static uint8_t fdc_last_command;
-static int load_trace_enabled;
-static int fdc_step_direction = 1;
-static const uint8_t *fdc_data;
-static size_t fdc_remaining;
-static unsigned int fdc_data_reads;
-static uint32_t fdc_read_pcs[16];
-static size_t fdc_read_pc_count;
-static unsigned int duart_output;
-static int duart_tx_a_enabled;
-static int duart_tx_a_ready = 1;
-static uint64_t duart_tx_a_ready_cycle;
-static int duart_tx_b_enabled;
-static int duart_tx_b_ready = 1;
-static uint64_t duart_tx_b_ready_cycle;
-static uint8_t midi_tx[256];
-static size_t midi_tx_count;
-static uint16_t analog_values[8] = {
-    0x7fc0, /* pitch wheel: centered */
-    0x0000, /* patch select: released */
-    0xffc0, /* modulation wheel: minimum */
-    0x5980, /* data entry: center of the EPS raw ADC span 28..687 */
-    0xffc0, /* pedal / control voltage */
-    0xffc0, /* volume */
-    0x7fc0, /* battery */
-    0x5540  /* voltage reference */
-};
-static unsigned int analog_reads[8];
-static int duart_timer_pending;
-static int duart_timer_running;
-static uint64_t duart_timer_next_cycle;
-static unsigned int fdc_reads;
-static uint8_t dmac_registers[4][0x40];
-static int dmac_irq_channel = -1;
-static unsigned int dmac_transfers;
-typedef struct {
-    long long cycle;
-    uint32_t pc;
-    uint8_t kind;
-    uint8_t channel;
-    uint8_t reg;
-    uint8_t value;
-} DmaTrace;
-static DmaTrace dma_trace[256];
-static size_t dma_trace_count;
-typedef struct {
-    uint8_t command;
-    uint8_t track;
-    uint8_t sector;
-    uint8_t side;
-    unsigned int block;
-    uint32_t destination;
-} FdcEvent;
-static FdcEvent fdc_events[256];
-static size_t fdc_event_count;
-static Trace traces[MAX_TRACES];
-static size_t trace_count;
-static uint32_t postboot_pc_counts[ROM_SIZE / 2];
-static uint32_t postboot_os_pc_counts[OS_RAM_SIZE / 2];
-static uint64_t postboot_instruction_count;
-static uint64_t postboot_rom_instructions;
-static uint64_t postboot_low_ram_instructions;
-static uint64_t postboot_sample_ram_instructions;
-static uint64_t postboot_os_ram_instructions;
-static uint64_t postboot_other_instructions;
-static uint32_t pc_ring[64];
-static size_t pc_ring_position;
-static uint32_t fatal_history[64];
-static int fatal_history_captured;
-static uint32_t es5510_verify_d1;
-static uint32_t es5510_verify_d2;
-static uint32_t es5510_verify_d3;
-static uint32_t es5510_verify_a3;
-static uint32_t es5510_verify_a6;
-static uint8_t es5510_verify_actual;
-static unsigned int es5510_verify_failures;
-static uint64_t audio_frames;
-static int32_t audio_peak;
-static int32_t es5505_bus_peak[ES5505_STEREO_BUSES];
-static int32_t es5510_return_peak;
-static unsigned int es5505_irqs;
-typedef struct { long long cycle; uint32_t pc; uint8_t level; uint8_t vector; } IrqTrace;
-static IrqTrace irq_trace[128];
-static size_t irq_trace_count;
-static KpcLegacy kpc;
-static KpcFirmware kpc_firmware;
-static KpcDevice kpc_device;
-static int kpc_firmware_execution;
-static int kpc_firmware_failure_reported;
-enum { KPC_PHYSICAL_QUEUE_SIZE = 256 };
-static uint8_t kpc_physical_queue[KPC_PHYSICAL_QUEUE_SIZE];
-static size_t kpc_physical_queue_read;
-static size_t kpc_physical_queue_write;
-static size_t kpc_physical_queue_count;
-static uint8_t kpc_physical_expected;
-static int kpc_physical_active;
-static int kpc_physical_saw_code;
-static uint64_t kpc_physical_next_cycle;
-static uint8_t display_trace_bytes[256];
-static size_t display_trace_byte_count;
-typedef struct {
-    long long cycle;
-    uint32_t pc;
-    uint16_t opcode;
-} IllegalInstruction;
-static IllegalInstruction illegal_instructions[16];
-static size_t illegal_instruction_count;
-static int live_quit;
-static uint64_t live_press_cycle[128];
-static int sampling_enter_pending;
-static uint64_t sampling_enter_release_cycle;
-static int sampling_recording_active;
-static uint64_t button_dispatch_trace_until;
-static unsigned int button_dispatch_trace_lines;
-static uint32_t sample_live_current_pc;
-static unsigned int sample_live_bus_trace_lines;
-static FILE *sample_live_trace;
-
 static void sample_live_log(const char *format, ...) {
     if (!sample_live_trace) return;
     va_list arguments;
@@ -430,7 +589,7 @@ static int kpc_execution_panel_packet(const uint8_t *bytes, size_t length,
 static void duart_refresh_irq_line(void);
 
 static void panel_drop_pending_ready(void) {
-    static PanelWireByte kept_wire[PANEL_WIRE_SIZE];
+    PanelWireByte *const kept_wire = RP(kept_wire);
     size_t kept_wire_count = 0;
     while (panel_wire_count) {
         PanelWireByte item = panel_wire[panel_wire_read];
@@ -447,7 +606,7 @@ static void panel_drop_pending_ready(void) {
         panel_wire_tail_cycle = kept_wire[index].cycle;
     }
 
-    static uint8_t kept_rx[PANEL_RX_SIZE];
+    uint8_t *const kept_rx = RP(kept_rx);
     size_t kept_rx_count = 0;
     while (panel_rx_count) {
         uint8_t item = panel_rx[panel_rx_read];
@@ -746,7 +905,6 @@ static uint16_t es5505_sample_read(void *context, unsigned int bank, uint32_t ad
 
 static uint16_t es5505_port_read(void *context) {
     (void)context;
-    static unsigned int trace_count;
     /* The EPS analog scanner is phased by the DUART's automatically-driven
        OP4-OP7 outputs.  OP0-OP2 are not the ADC channel number here (OP1 is
        also floppy side-select).  The original ROM's polling loop establishes
@@ -764,7 +922,7 @@ static uint16_t es5505_port_read(void *context) {
         default: channel = 7; break;   /* startup/reference phase */
     }
     ++analog_reads[channel];
-    if (getenv("EPS16_TRACE_ADC") && trace_count++ < 160)
+    if (getenv("EPS16_TRACE_ADC") && RP(es5505_port_trace_count)++ < 160)
         fprintf(stderr,
                 "adc_trace cycle:%lld pc:%06x a2:%06x opr:%02x channel:%u value:%04x reference:%04x page:%02x\n",
                 current_cycle, m68k_get_reg(NULL, M68K_REG_PC) & 0xffffff,
@@ -784,15 +942,14 @@ static void es5505_write16(unsigned int address, uint16_t value) {
     unsigned int reg = ((address - ES5505_BASE) >> 1) & 15;
     unsigned int page_before = es5505.page;
     uint16_t control_before = es5505.voices[page_before & 31].control;
-    static int trace_writes = -1;
-    static long long trace_start_cycle;
-    if (trace_writes < 0) {
+    if (RP(es5505_trace_writes) < 0) {
         const char *enabled = getenv("EPS16_TRACE_ES5505_WRITES");
         const char *start = getenv("EPS16_TRACE_ES5505_START_CYCLE");
-        trace_writes = enabled && *enabled;
-        trace_start_cycle = start && *start ? atoll(start) : 0;
+        RP(es5505_trace_writes) = enabled && *enabled;
+        RP(es5505_trace_start_cycle) = start && *start ? atoll(start) : 0;
     }
-    if (trace_writes && current_cycle >= trace_start_cycle)
+    if (RP(es5505_trace_writes) &&
+        current_cycle >= RP(es5505_trace_start_cycle))
         printf("es5505_write cycle:%lld page:%02x reg:%x value:%04x\n",
                current_cycle, es5505.page, reg, value);
     ++es5505_writes;
@@ -1553,8 +1710,6 @@ static uint16_t dmac_get16(unsigned int channel, unsigned int offset) {
            dmac_registers[channel][offset + 1];
 }
 
-static int dmac_pcl_level[4] = {1, 1, 1, 1};
-
 static void dmac_pcl_write(unsigned int channel, int state) {
     int old_state = dmac_pcl_level[channel];
     state = state != 0;
@@ -2125,6 +2280,7 @@ static int parse_panel_event(const char *text, uint8_t *event, size_t *length) {
 }
 
 int main(int argc, char **argv) {
+    rom_probe_state_defaults(rom_probe_state);
     if (argc < 2 || argc > 6) {
         fprintf(stderr,
                 "usage: %s COMBINED_ROM [CYCLES=200000] [LOGICAL_DISK_IMG] "
