@@ -4,11 +4,42 @@
 #include <utility>
 
 namespace eps16::vst3 {
+namespace {
+class MachineAccess {
+public:
+    explicit MachineAccess(Eps16ProbeMachine *target)
+        : machine(target), active(eps16_probe_machine_begin(machine) != 0) {}
+    ~MachineAccess() {
+        if (active) eps16_probe_machine_end(machine);
+    }
+    explicit operator bool() const { return active; }
+
+private:
+    Eps16ProbeMachine *machine{};
+    bool active{};
+};
+} // namespace
 
 ProbeMachineSink::ProbeMachineSink() {
+    machine = eps16_probe_machine_create();
     for (std::size_t index = 0; index < 22; ++index)
         displayCharacters[index].store(' ', std::memory_order_relaxed);
     displayCharacters[22].store('\0', std::memory_order_relaxed);
+}
+
+ProbeMachineSink::~ProbeMachineSink() {
+    eps16_probe_machine_destroy(machine);
+}
+
+bool ProbeMachineSink::beginBlock() {
+    blockActive = isReady() && machine && eps16_probe_machine_begin(machine);
+    return blockActive;
+}
+
+void ProbeMachineSink::endBlock() {
+    if (!blockActive) return;
+    eps16_probe_machine_end(machine);
+    blockActive = false;
 }
 
 void ProbeMachineSink::configure(std::string romPath, std::string kpcPath,
@@ -22,6 +53,13 @@ void ProbeMachineSink::prepare(double dawSampleRate) {
     if (!resampler.prepare(dawSampleRate)) {
         const std::lock_guard<std::mutex> lock(statusMutex);
         statusText = "unsupported DAW sample rate";
+        ready.store(false, std::memory_order_release);
+        return;
+    }
+    MachineAccess access(machine);
+    if (!access) {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = "machine instance allocation failed";
         ready.store(false, std::memory_order_release);
         return;
     }
@@ -113,6 +151,8 @@ void ProbeMachineSink::publishDisplay() {
             eps16_probe_machine_indicator_flash(bank),
             std::memory_order_relaxed);
     }
+    displayIllegalInstructions.store(
+        eps16_probe_machine_illegal_instructions(), std::memory_order_relaxed);
 }
 
 std::string ProbeMachineSink::display() const {
@@ -128,11 +168,14 @@ std::string ProbeMachineSink::status() const {
 }
 
 std::size_t ProbeMachineSink::illegalInstructions() const {
-    return isReady() ? eps16_probe_machine_illegal_instructions() : 0;
+    return isReady()
+        ? displayIllegalInstructions.load(std::memory_order_relaxed) : 0;
 }
 
 std::vector<std::uint8_t> ProbeMachineSink::captureState() const {
-    const auto size = isReady() ? eps16_probe_machine_state_size() : 0;
+    MachineAccess access(machine);
+    const auto size = isReady() && access
+        ? eps16_probe_machine_state_size() : 0;
     std::vector<std::uint8_t> result(size);
     if (size && !eps16_probe_machine_save_state(result.data(), result.size()))
         result.clear();
@@ -141,6 +184,8 @@ std::vector<std::uint8_t> ProbeMachineSink::captureState() const {
 
 bool ProbeMachineSink::restoreState(const void *data, std::size_t size) {
     if (!isReady() || !data || !size) return false;
+    MachineAccess access(machine);
+    if (!access) return false;
     char error[256]{};
     if (!eps16_probe_machine_load_state(data, size, error, sizeof(error))) {
         const std::lock_guard<std::mutex> lock(statusMutex);

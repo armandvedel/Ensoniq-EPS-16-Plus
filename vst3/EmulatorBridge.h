@@ -20,6 +20,8 @@ struct MidiEvent {
 class EmulatorSink {
 public:
     virtual ~EmulatorSink() = default;
+    virtual bool beginBlock() { return true; }
+    virtual void endBlock() {}
     virtual void prepare(double dawSampleRate) = 0;
     virtual void runUntil(std::uint64_t absoluteCpuCycle) = 0;
     virtual void midi(std::uint8_t status, std::uint8_t data1,

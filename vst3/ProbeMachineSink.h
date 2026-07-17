@@ -3,6 +3,7 @@
 
 #include "BandlimitedResampler.h"
 #include "EmulatorBridge.h"
+#include "ProbeMachine.h"
 
 #include <array>
 #include <atomic>
@@ -16,6 +17,9 @@ namespace eps16::vst3 {
 class ProbeMachineSink final : public EmulatorSink {
 public:
     ProbeMachineSink();
+    ~ProbeMachineSink() override;
+    bool beginBlock() override;
+    void endBlock() override;
     void configure(std::string romPath, std::string kpcPath,
                    std::string osDiskPath);
 
@@ -69,9 +73,12 @@ private:
     std::atomic<int> displayCursorStart{-1};
     std::atomic<int> displayCursorEnd{-1};
     std::atomic<std::uint32_t> displayDecimalMask{};
+    std::atomic<std::size_t> displayIllegalInstructions{};
     std::array<std::atomic<std::uint16_t>, 3> displayIndicatorOn{};
     std::array<std::atomic<std::uint16_t>, 3> displayIndicatorFlash{};
     std::atomic<bool> ready{};
+    Eps16ProbeMachine *machine{};
+    bool blockActive{};
     std::uint64_t cycleBase{};
     BandlimitedResampler resampler;
 };

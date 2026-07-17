@@ -74,11 +74,19 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   22-cell VFD above the eight track keys, and sampling/sequencer controls at
   the right. Resizing preserves the photographed rack aspect ratio.
 
-The current sink executes the authentic machine and is audible, but its state
-is still file-static inside the loaded VST module. It is therefore not yet
-safe for multiple independent instances. Hosts may retain that state after an
-instance is removed because they normally keep the module loaded; complete
-instance ownership remains the next extraction milestone.
+Each plug-in processor now owns a complete machine image, including CPU,
+RAM/sample RAM, KPC, ES5505, ES5510, panel, disk and audio-queue state. The
+verified file-static core is selected only for the duration of a DAW block;
+switches save the previous image and restore the requested one. A process-wide
+mutex makes simultaneous host audio threads safe. Multiple plug-in instances
+therefore boot, run, sample and save independently without changing the
+existing machine or VST-state formats.
+
+This is the conservative first instance-isolation step, not the final
+parallel-core extraction: blocks from separate EPS instances are serialized
+inside the emulator core and switching instances copies the machine image.
+The DAW may schedule the surrounding plug-in work normally, but the authentic
+cores do not yet execute simultaneously on separate CPU cores.
 
 ## Deterministic callback contract
 
@@ -109,6 +117,11 @@ cmake --build work/vst3-build --target eps16_vst3_package
 ctest --test-dir work/vst3-build --output-on-failure
 ```
 
+The resource-backed regression executables additionally cover two independent
+low-level machines, two simultaneous plug-in processors, the complete
+sampling path, and VST-state round trips. ROM, KPC ROM and OS disk paths are
+passed to those tests at run time and are never embedded in the binaries.
+
 The raw bundle is written below
 `work/vst3-build/vst3/Eps16Plus_artefacts/Release/VST3/`. The package target
 copies it without Finder/resource-fork metadata, ad-hoc signs and strictly
@@ -117,15 +130,16 @@ verifies it, then writes
 contains the plug-in plus an `EPS_files` sibling folder with a README, but no
 ROM, KPC ROM or OS disk.
 
-## Next milestone: authentic engine extraction
+## Next milestone: parallel authentic engine extraction
 
-The next change should not rewrite working device behavior. It should move the
-existing verified state and loop into an instance-owned `Eps16Machine` in
-small compiling steps:
+The next change should not rewrite working device behavior. It should replace
+blockwise image switching with a directly addressed, instance-owned
+`Eps16Machine` in small compiling steps:
 
 1. Separate CLI diagnostics and `live_host` calls from machine state.
 2. Make RAM, MMIO, KPC, DMA, DUART, FDC, ES5505, ES5510 and Musashi context
-   instance-owned. Remove all file-static machine globals.
+   directly instance-owned. Remove all file-static machine globals and the
+   process-wide execution mutex.
 3. Expose external resource loading, physical panel bytes, MIDI bytes, stereo
    sampling input, `runUntil(cycle)` and stereo rendering through the sink
    implemented in this milestone.

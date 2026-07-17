@@ -28,6 +28,7 @@ static void plugin_capture_display(const char display[23], uint32_t decimal_mask
 #include "m68kcpu.h"
 
 #include <math.h>
+#include <pthread.h>
 
 static int plugin_initialized;
 static uint64_t plugin_executed;
@@ -94,6 +95,126 @@ static size_t plugin_panel_pair_count;
 #define PLUGIN_SNAPSHOT_V2_FIELDS(X) \
     X(panel_indicator_on) X(panel_indicator_flash) \
     X(panel_indicator_command_pending)
+
+/* The verified core is still compiled from rom_probe.c, but every plug-in
+   instance owns a complete image of its functional machine state. The active
+   image is selected only at DAW block boundaries, so the existing CPU and
+   device code remains byte-for-byte unchanged inside a block. */
+typedef struct {
+#define INSTANCE_FIELD(name) __typeof__(name) name;
+    PLUGIN_SNAPSHOT_FIELDS(INSTANCE_FIELD)
+    PLUGIN_SNAPSHOT_V2_FIELDS(INSTANCE_FIELD)
+#undef INSTANCE_FIELD
+    __typeof__(rom) rom;
+    __typeof__(es5505) es5505;
+    __typeof__(kpc_device) kpc_device;
+    __typeof__(plugin_published_display) plugin_published_display;
+    __typeof__(plugin_published_decimal_mask) plugin_published_decimal_mask;
+    __typeof__(plugin_audio_queue) plugin_audio_queue;
+    __typeof__(plugin_audio_queue_read) plugin_audio_queue_read;
+    __typeof__(plugin_audio_queue_write) plugin_audio_queue_write;
+    __typeof__(plugin_initialized) plugin_initialized;
+    m68ki_cpu_core cpu;
+    int64_t fdc_data_offset;
+} PluginMachineImage;
+
+struct Eps16ProbeMachine {
+    PluginMachineImage image;
+};
+
+static pthread_mutex_t plugin_instance_mutex = PTHREAD_MUTEX_INITIALIZER;
+static Eps16ProbeMachine *plugin_active_instance;
+static PluginMachineImage plugin_initial_image;
+static int plugin_initial_image_ready;
+
+static void plugin_capture_machine_image(PluginMachineImage *image) {
+#define CAPTURE_INSTANCE_FIELD(name) \
+    memcpy(&image->name, &name, sizeof(name));
+    PLUGIN_SNAPSHOT_FIELDS(CAPTURE_INSTANCE_FIELD)
+    PLUGIN_SNAPSHOT_V2_FIELDS(CAPTURE_INSTANCE_FIELD)
+#undef CAPTURE_INSTANCE_FIELD
+    memcpy(&image->rom, &rom, sizeof(rom));
+    memcpy(&image->es5505, &es5505, sizeof(es5505));
+    memcpy(&image->kpc_device, &kpc_device, sizeof(kpc_device));
+    memcpy(&image->plugin_published_display, &plugin_published_display,
+           sizeof(plugin_published_display));
+    image->plugin_published_decimal_mask = plugin_published_decimal_mask;
+    memcpy(&image->plugin_audio_queue, &plugin_audio_queue,
+           sizeof(plugin_audio_queue));
+    image->plugin_audio_queue_read = plugin_audio_queue_read;
+    image->plugin_audio_queue_write = plugin_audio_queue_write;
+    image->plugin_initialized = plugin_initialized;
+    image->fdc_data_offset = -1;
+    if (fdc_data) {
+        const uintptr_t pointer = (uintptr_t)fdc_data;
+        const uintptr_t beginning = (uintptr_t)disk_image;
+        const uintptr_t end = beginning + sizeof(disk_image);
+        if (pointer >= beginning && pointer < end)
+            image->fdc_data_offset = (int64_t)(pointer - beginning);
+    }
+    m68k_get_context(&image->cpu);
+}
+
+static void plugin_restore_machine_image(const PluginMachineImage *image) {
+#define RESTORE_INSTANCE_FIELD(name) \
+    memcpy(&name, &image->name, sizeof(name));
+    PLUGIN_SNAPSHOT_FIELDS(RESTORE_INSTANCE_FIELD)
+    PLUGIN_SNAPSHOT_V2_FIELDS(RESTORE_INSTANCE_FIELD)
+#undef RESTORE_INSTANCE_FIELD
+    memcpy(&rom, &image->rom, sizeof(rom));
+    memcpy(&es5505, &image->es5505, sizeof(es5505));
+    memcpy(&kpc_device, &image->kpc_device, sizeof(kpc_device));
+    memcpy(&plugin_published_display, &image->plugin_published_display,
+           sizeof(plugin_published_display));
+    plugin_published_decimal_mask = image->plugin_published_decimal_mask;
+    memcpy(&plugin_audio_queue, &image->plugin_audio_queue,
+           sizeof(plugin_audio_queue));
+    plugin_audio_queue_read = image->plugin_audio_queue_read;
+    plugin_audio_queue_write = image->plugin_audio_queue_write;
+    plugin_initialized = image->plugin_initialized;
+    fdc_data = image->fdc_data_offset >= 0
+                   ? disk_image + image->fdc_data_offset : NULL;
+    m68k_set_context((void *)&image->cpu);
+}
+
+Eps16ProbeMachine *eps16_probe_machine_create(void) {
+    Eps16ProbeMachine *machine = calloc(1, sizeof(*machine));
+    if (!machine) return NULL;
+    pthread_mutex_lock(&plugin_instance_mutex);
+    if (!plugin_initial_image_ready) {
+        plugin_capture_machine_image(&plugin_initial_image);
+        plugin_initial_image_ready = 1;
+    }
+    memcpy(&machine->image, &plugin_initial_image,
+           sizeof(plugin_initial_image));
+    pthread_mutex_unlock(&plugin_instance_mutex);
+    return machine;
+}
+
+void eps16_probe_machine_destroy(Eps16ProbeMachine *machine) {
+    if (!machine) return;
+    pthread_mutex_lock(&plugin_instance_mutex);
+    if (plugin_active_instance == machine) plugin_active_instance = NULL;
+    pthread_mutex_unlock(&plugin_instance_mutex);
+    free(machine);
+}
+
+int eps16_probe_machine_begin(Eps16ProbeMachine *machine) {
+    if (!machine) return 0;
+    pthread_mutex_lock(&plugin_instance_mutex);
+    if (plugin_active_instance != machine) {
+        if (plugin_active_instance)
+            plugin_capture_machine_image(&plugin_active_instance->image);
+        plugin_restore_machine_image(&machine->image);
+        plugin_active_instance = machine;
+    }
+    return 1;
+}
+
+void eps16_probe_machine_end(Eps16ProbeMachine *machine) {
+    (void)machine;
+    pthread_mutex_unlock(&plugin_instance_mutex);
+}
 
 typedef struct {
     uint8_t magic[8];

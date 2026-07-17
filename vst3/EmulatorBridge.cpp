@@ -100,6 +100,11 @@ void EmulatorBridge::process(const float *inputLeft, const float *inputRight,
                              const MidiEvent *midiEvents,
                              std::size_t midiEventCount) {
     if (samples <= 0 || !outputLeft || !outputRight) return;
+    if (!sink.beginBlock()) {
+        std::fill_n(outputLeft, samples, 0.0f);
+        std::fill_n(outputRight, samples, 0.0f);
+        return;
+    }
     dispatchControls(clock.cycles());
     std::size_t midiIndex = 0;
     for (int sample = 0; sample < samples; ++sample) {
@@ -124,6 +129,7 @@ void EmulatorBridge::process(const float *inputLeft, const float *inputRight,
         ++midiIndex;
     }
     publishedCycles.store(clock.cycles(), std::memory_order_relaxed);
+    sink.endBlock();
 }
 
 } // namespace eps16::vst3

@@ -8,6 +8,13 @@
 extern "C" {
 #endif
 
+typedef struct Eps16ProbeMachine Eps16ProbeMachine;
+
+Eps16ProbeMachine *eps16_probe_machine_create(void);
+void eps16_probe_machine_destroy(Eps16ProbeMachine *machine);
+int eps16_probe_machine_begin(Eps16ProbeMachine *machine);
+void eps16_probe_machine_end(Eps16ProbeMachine *machine);
+
 int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
                                    const char *os_disk_path,
                                    char *error, size_t error_size);

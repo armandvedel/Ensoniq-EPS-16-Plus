@@ -114,6 +114,13 @@ target_link_libraries(eps16_indicator_map_probe PRIVATE eps16_probe_machine)
 add_executable(eps16_probe_machine_restore_test ProbeMachineRestoreTest.c)
 target_link_libraries(eps16_probe_machine_restore_test PRIVATE eps16_probe_machine)
 
+add_executable(eps16_probe_machine_multi_instance_test
+  ProbeMachineMultiInstanceTest.c
+)
+target_link_libraries(eps16_probe_machine_multi_instance_test PRIVATE
+  eps16_probe_machine
+)
+
 add_executable(eps16_vst3_editor_smoke_test EditorSmokeTest.cpp)
 target_link_libraries(eps16_vst3_editor_smoke_test PRIVATE
   Eps16Plus
@@ -123,6 +130,12 @@ add_test(NAME vst3_editor_smoke COMMAND eps16_vst3_editor_smoke_test)
 
 add_executable(eps16_vst3_plugin_state_test PluginStateTest.cpp)
 target_link_libraries(eps16_vst3_plugin_state_test PRIVATE
+  Eps16Plus
+  juce::juce_gui_basics
+)
+
+add_executable(eps16_vst3_multi_instance_test PluginMultiInstanceTest.cpp)
+target_link_libraries(eps16_vst3_multi_instance_test PRIVATE
   Eps16Plus
   juce::juce_gui_basics
 )
