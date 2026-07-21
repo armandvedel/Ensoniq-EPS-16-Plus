@@ -209,6 +209,13 @@ add_test(NAME vst3_bandlimited_resampler
 add_executable(eps16_probe_machine_test ProbeMachineTest.c)
 target_link_libraries(eps16_probe_machine_test PRIVATE eps16_probe_machine)
 
+add_executable(eps16_command_instrument_workflow_test
+  CommandInstrumentWorkflowTest.c
+)
+target_link_libraries(eps16_command_instrument_workflow_test PRIVATE
+  eps16_probe_machine
+)
+
 add_executable(eps16_disk_load_workflow_test
   DiskLoadWorkflowTest.cpp
   ProbeMachineSink.cpp

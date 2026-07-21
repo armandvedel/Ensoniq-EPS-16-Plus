@@ -153,15 +153,20 @@ The KPC poll and calibration-state model now advances the original OS through
 `TUNING KBD - HANDS OFF` and `KEYBOARD TUNED`. WD1772/MC68450 directory reads
 and runtime disk swaps now work. An end-to-end sweep against the live OS has
 verified these matrix indices against the original OS: COMMAND `06`, EDIT
-`05`, INSTRUMENT `1a`, SEQ-SONG `15`, SYSTEM-MIDI `1b`, and
+`05`, INSTRUMENT `0f`, LOAD `1a`, SEQ-SONG `15`, SYSTEM-MIDI `1b`, and
 EFFECTS `09`. The numeric page keys are also verified: 0-9 map to `0c`, `0d`,
 `12`, `13`, `18`, `19`, `1e`, `1f`, `24`, and `25`.
 
-LOAD is live-observed as matrix index `0f`: after booting the OS disk and
-manually inserting ED-001, `0f` opens the instrument file browser. The former
-`05` mapping is EDIT; `04` is inert after a track is selected and must not be
-used as LOAD. Matrix index `22` is not LOAD: in the `PICK INSTRUMENT BUTTON`
-destination prompt it starts loading, so it is an Instrument/Track candidate.
+INSTRUMENT and LOAD were disambiguated with a complete original-OS workflow:
+create an instrument, layer, and wavesample, then press COMMAND followed by
+the candidate page key. Raw `0f` reaches `CREATE NEW INSTRUMENT`; raw `1a`
+returns to the LOAD context and shows `NO INSTRUMENTS`. The earlier conclusion
+that `0f` was LOAD came from pressing it while the OS was already in LOAD mode
+with the Instrument page retained, where the physical INSTRUMENT key naturally
+opens the instrument file browser. The former `05` mapping is EDIT; `04` is
+inert after a track is selected and must not be used as LOAD. Matrix index `22`
+is not LOAD: in the `PICK INSTRUMENT BUTTON` destination prompt it starts
+loading, so it is an Instrument/Track candidate.
 
 Matrix index `21` is live-observed, in the loaded-instrument context, to toggle
 the instrument display between name plus volume and name-only. Its physical

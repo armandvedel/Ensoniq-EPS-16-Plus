@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
     }
     eps16_probe_machine_run_until(220000000);
     const struct { const char *name; uint8_t code; } pages[] = {
-        {"INSTRUMENT", 0x1a}, {"SEQ-SONG", 0x15},
+        {"LOAD", 0x1a}, {"INSTRUMENT", 0x0f}, {"SEQ-SONG", 0x15},
         {"SYSTEM-MIDI", 0x1b}, {"EFFECTS", 0x09},
         {"ENV", 0x0d}, {"PITCH", 0x18}, {"FILTER", 0x19},
         {"AMP", 0x1e}, {"LFO", 0x1f}, {"WAVE", 0x24},

@@ -495,8 +495,8 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
                                              pages[index].second);
 
     const std::array<std::pair<const char *, std::uint8_t>, 7> modes{{
-        {"LOAD", 0x0f}, {"CMD", 0x06}, {"EDIT", 0x05},
-        {"INST", 0x1a}, {"SEQ SONG", 0x15}, {"SYSTEM MIDI", 0x1b},
+        {"LOAD", 0x1a}, {"CMD", 0x06}, {"EDIT", 0x05},
+        {"INST", 0x0f}, {"SEQ SONG", 0x15}, {"SYSTEM MIDI", 0x1b},
         {"EFFECTS", 0x09}
     }};
     for (std::size_t index = 0; index < modes.size(); ++index)
