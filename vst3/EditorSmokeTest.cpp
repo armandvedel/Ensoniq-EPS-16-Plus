@@ -8,6 +8,8 @@ int main(int argc, char **argv) {
     const juce::ScopedJuceInitialiser_GUI gui;
     Eps16PlusProcessor processor;
     processor.setResourcePath(Eps16PlusProcessor::romPathKey, "/tmp/test-rom.bin");
+    processor.setResourcePath(Eps16PlusProcessor::mountedDiskPathKey,
+                              "/tmp/TEST-DISK.hfe");
     juce::MemoryBlock state;
     processor.getStateInformation(state);
     if (state.getSize() < 24) return 1;
@@ -28,6 +30,11 @@ int main(int argc, char **argv) {
         !editor->findChildWithID("new-disk-button") ||
         !editor->findChildWithID("load-disk-button") ||
         !editor->findChildWithID("save-disk-button"))
+        return 1;
+    auto *diskName = dynamic_cast<juce::Label *>(
+        editor->findChildWithID("mounted-disk-name"));
+    if (!diskName || diskName->getText() != "DISK: TEST-DISK.hfe" ||
+        diskName->getBounds().isEmpty())
         return 1;
     auto *dataEntry = dynamic_cast<juce::Slider *>(
         editor->findChildWithID("data-entry-slider"));

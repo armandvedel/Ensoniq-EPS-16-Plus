@@ -68,6 +68,7 @@ private:
     bool updateArrowKey(int keyCode, bool isDown);
     void releaseArrowKeys();
     void openSaveDiskDialog(bool hfeFormat);
+    void updateDiskName();
     void timerCallback() override;
 
     Eps16PlusProcessor &owner;
@@ -79,6 +80,7 @@ private:
     DiskButton newDiskButton{"New blank disk", "NEW"};
     DiskButton loadDiskButton{"Load disk image", "LOAD"};
     DiskButton saveDiskButton{"Save disk image", "SAVE"};
+    juce::Label diskName;
     std::unique_ptr<juce::FileChooser> diskChooser;
     std::vector<std::unique_ptr<PanelButton>> buttons;
     std::array<PanelButton *, 12> pageButtons{};

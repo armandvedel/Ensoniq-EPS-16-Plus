@@ -140,7 +140,13 @@ static int encode_track_side(const uint8_t *logical, unsigned int track,
                              size_t encoded_size) {
     MfmStream stream = {encoded, 0, encoded_size, 0};
     if (!mfm_repeat(&stream, 0x4e, 80)) return 0;
-    for (unsigned int sector = 0; sector < EPS_SECTORS; ++sector) {
+    /* Match the physical sector skew used by EPS-formatted media.  Each
+       cylinder advances six sector positions and side one begins two
+       positions before side zero. */
+    const unsigned int first_sector =
+        (track * 6U + side * 8U) % EPS_SECTORS;
+    for (unsigned int position = 0; position < EPS_SECTORS; ++position) {
+        const unsigned int sector = (first_sector + position) % EPS_SECTORS;
         uint8_t id[5] = {0xfe, (uint8_t)track, (uint8_t)side,
                          (uint8_t)sector, 2};
         uint16_t id_crc = crc16((const uint8_t *)"\xa1\xa1\xa1", 3, 0xffff);
@@ -182,8 +188,8 @@ static uint8_t *encode_hfe(const uint8_t *logical, size_t logical_size,
     enum {
         HFE_HEADER_BLOCKS = 2,
         HFE_TRACK_BLOCKS = 49,
-        HFE_TRACK_LENGTH = 25008,
-        HFE_SIDE_LENGTH = HFE_TRACK_LENGTH / 2
+        HFE_TRACK_LENGTH = HFE_TRACK_BLOCKS * 512,
+        HFE_SIDE_LENGTH = HFE_TRACK_BLOCKS * 256
     };
     if (!logical || logical_size != EPS16_LOGICAL_DISK_SIZE) {
         fail(error, error_size, "logical buffer must be %u bytes",

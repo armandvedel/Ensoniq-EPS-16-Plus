@@ -475,6 +475,15 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     };
     addAndMakeVisible(saveDiskButton);
 
+    diskName.setComponentID("mounted-disk-name");
+    diskName.setJustificationType(juce::Justification::centredRight);
+    diskName.setMinimumHorizontalScale(0.55f);
+    diskName.setColour(juce::Label::textColourId,
+                       rackLabelColour.withAlpha(0.86f));
+    diskName.setInterceptsMouseClicks(false, false);
+    addAndMakeVisible(diskName);
+    updateDiskName();
+
     const std::array<std::pair<const char *, std::uint8_t>, 12> pages{{
         {"1 / ENV 1", 0x0d}, {"2 / ENV 2", 0x12}, {"3 / ENV 3", 0x13},
         {"4 / PITCH", 0x18}, {"5 / FILTER", 0x19}, {"6 / AMP", 0x1e},
@@ -647,6 +656,33 @@ void Eps16PanelEditor::focusLost(FocusChangeType cause) {
     AudioProcessorEditor::focusLost(cause);
 }
 
+void Eps16PanelEditor::updateDiskName() {
+    juce::String name;
+    juce::String tooltip;
+    if (owner.blankDiskMounted()) {
+        name = "NEWDISK (UNSAVED)";
+        tooltip = "New blank EPS disk (not saved to a host file)";
+    } else {
+        const auto mountedPath = owner.getResourcePath(
+            Eps16PlusProcessor::mountedDiskPathKey);
+        if (mountedPath.isNotEmpty()) {
+            const juce::File mounted(mountedPath);
+            name = mounted.getFileName();
+            tooltip = mounted.getFullPathName();
+        } else {
+            const juce::File osDisk(owner.getResourcePath(
+                Eps16PlusProcessor::osDiskPathKey));
+            if (owner.machineReady() && osDisk.existsAsFile()) {
+                name = osDisk.getFileName();
+                tooltip = osDisk.getFullPathName();
+            }
+        }
+    }
+    diskName.setText("DISK: " + (name.isNotEmpty() ? name : "NONE"),
+                     juce::dontSendNotification);
+    diskName.setTooltip(tooltip);
+}
+
 void Eps16PanelEditor::timerCallback() {
     owner.refreshResourcePaths();
     const juce::File osDisk(owner.getResourcePath(
@@ -661,6 +697,7 @@ void Eps16PanelEditor::timerCallback() {
     loadDiskButton.setTooltip("Insert an EPS .IMG or .HFE disk image");
     saveDiskButton.setEnabled(owner.machineReady());
     saveDiskButton.setTooltip("Save the inserted disk as .IMG or .HFE");
+    updateDiskName();
     vfd.setText(owner.machineDisplay(), juce::dontSendNotification);
     vfd.setCursorSegmentMask(owner.machineCursorSegmentMask());
     vfd.setDecimalMask(owner.machineDecimalMask());
@@ -922,5 +959,8 @@ void Eps16PanelEditor::resized() {
     newDiskButton.setBounds(rackRect(1203, 20, 32, 36));
     loadDiskButton.setBounds(rackRect(1239, 20, 32, 36));
     saveDiskButton.setBounds(rackRect(1275, 20, 32, 36));
+    diskName.setBounds(rackRect(1167, 57, 140, 14));
+    diskName.setFont(juce::Font(juce::FontOptions(
+        "Helvetica Neue", 7.5f * scale, juce::Font::plain)));
 
 }
