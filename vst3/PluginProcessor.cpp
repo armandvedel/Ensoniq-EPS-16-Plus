@@ -40,6 +40,8 @@ juce::File firstFileWithSize(const juce::File &directory,
 const juce::Identifier Eps16PlusProcessor::romPathKey{"combinedRomPath"};
 const juce::Identifier Eps16PlusProcessor::kpcPathKey{"kpcRomPath"};
 const juce::Identifier Eps16PlusProcessor::osDiskPathKey{"osDiskPath"};
+const juce::Identifier Eps16PlusProcessor::mountedDiskPathKey{"mountedDiskPath"};
+const juce::Identifier Eps16PlusProcessor::blankDiskMountedKey{"blankDiskMounted"};
 
 Eps16PlusProcessor::Eps16PlusProcessor()
     : AudioProcessor(BusesProperties()
@@ -96,7 +98,8 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     }
 
     bridge.process(inputLeft, inputRight, mainOutput.getWritePointer(0),
-                   mainOutput.getWritePointer(1), samples, midiEvents.data(), eventCount);
+                   mainOutput.getWritePointer(1), samples, midiEvents.data(),
+                   eventCount);
     midi.clear();
 }
 
@@ -179,6 +182,60 @@ void Eps16PlusProcessor::setResourcePath(const juce::Identifier &key,
 
 juce::String Eps16PlusProcessor::getResourcePath(const juce::Identifier &key) const {
     return state.getProperty(key).toString();
+}
+
+bool Eps16PlusProcessor::insertOsDisk() {
+    refreshResourcePaths();
+    const juce::File diskFile(getResourcePath(osDiskPathKey));
+    if (!diskFile.existsAsFile()) return false;
+    const juce::ScopedLock lock(getCallbackLock());
+    if (!machineSink.insertDisk(diskFile.getFullPathName().toStdString(),
+                                "OS disk"))
+        return false;
+    state.setProperty(mountedDiskPathKey, diskFile.getFullPathName(), nullptr);
+    state.setProperty(blankDiskMountedKey, false, nullptr);
+    return true;
+}
+
+bool Eps16PlusProcessor::insertDisk(const juce::File &diskFile) {
+    if (!diskFile.existsAsFile()) return false;
+    const auto extension = diskFile.getFileExtension().toLowerCase();
+    if (extension != ".img" && extension != ".hfe") return false;
+    const juce::ScopedLock lock(getCallbackLock());
+    if (!machineSink.insertDisk(diskFile.getFullPathName().toStdString(),
+                                "Disk"))
+        return false;
+    state.setProperty(mountedDiskPathKey, diskFile.getFullPathName(), nullptr);
+    state.setProperty(blankDiskMountedKey, false, nullptr);
+    return true;
+}
+
+bool Eps16PlusProcessor::createBlankDisk() {
+    const juce::ScopedLock lock(getCallbackLock());
+    if (!machineSink.createBlankDisk()) return false;
+    state.setProperty(mountedDiskPathKey, juce::String(), nullptr);
+    state.setProperty(blankDiskMountedKey, true, nullptr);
+    return true;
+}
+
+bool Eps16PlusProcessor::blankDiskMounted() const {
+    return static_cast<bool>(state.getProperty(blankDiskMountedKey, false));
+}
+
+bool Eps16PlusProcessor::saveDisk(const juce::File &diskFile) {
+    auto output = diskFile;
+    auto extension = output.getFileExtension().toLowerCase();
+    if (extension != ".img" && extension != ".hfe") {
+        output = output.withFileExtension(".img");
+        extension = ".img";
+    }
+    const juce::ScopedLock lock(getCallbackLock());
+    if (!machineSink.saveDisk(output.getFullPathName().toStdString(),
+                              extension == ".hfe"))
+        return false;
+    state.setProperty(mountedDiskPathKey, output.getFullPathName(), nullptr);
+    state.setProperty(blankDiskMountedKey, false, nullptr);
+    return true;
 }
 
 juce::File Eps16PlusProcessor::defaultResourceDirectory() {

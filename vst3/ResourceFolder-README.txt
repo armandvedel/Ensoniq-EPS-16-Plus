@@ -1,8 +1,9 @@
 EPS-16 Plus external files
 ==========================
 
-Place the user-supplied files in this EPS_files folder, next to the VST3
-plug-in. The plug-in never contains or redistributes these copyrighted files.
+Place the user-supplied files in this EPS_files folder, next to the installed
+VST3 or Audio Unit plug-in. The plug-in never contains or redistributes these
+copyrighted files.
 
 Preferred names:
 
@@ -24,6 +25,12 @@ Typical installed layout:
       eps16plus-kpc.bin
       EPS130OS.img
 
+For the Audio Unit package use the equivalent Components folder:
+
+  ~/Library/Audio/Plug-Ins/Components/
+    EPS-16 Plus Prototype.component
+    EPS_files/
+
 Ableton Live sampling
 ---------------------
 
@@ -40,3 +47,18 @@ keyboard.
 
 If the files were added after the plug-in was opened, remove and insert the
 plug-in once so the authentic machine can initialize from reset.
+
+Disk controls
+-------------
+
+The four small floppy icons at the upper right are instance-local:
+
+  OS     reinsert the configured EPS130OS.img or EPS130OS.hfe
+  NEW    insert a fresh formatted empty 800 KiB EPS data disk
+  LOAD   choose and insert any EPS .img or HFE v1 disk image
+  SAVE   save the currently inserted disk as .img or HFE v1
+
+OS, NEW and LOAD send the original hardware disk-change input to the running
+EPS. NEW asks for confirmation because it ejects unsaved in-memory disk data.
+SAVE includes sector changes made by the original operating system. Choose
+.hfe when the exported disk will be used with HFE-compatible real hardware.

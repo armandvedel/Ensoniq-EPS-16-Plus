@@ -20,6 +20,31 @@ int main(int argc, char **argv) {
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
     if (!editor || editor->getWidth() != 1350 || editor->getHeight() != 285)
         return 1;
+    auto *vfd = dynamic_cast<juce::Label *>(
+        editor->findChildWithID("vfd-display"));
+    if (!vfd) return 1;
+    vfd->setText("MODE F1=3/LP F2=1/LP", juce::dontSendNotification);
+    if (!editor->findChildWithID("os-disk-button") ||
+        !editor->findChildWithID("new-disk-button") ||
+        !editor->findChildWithID("load-disk-button") ||
+        !editor->findChildWithID("save-disk-button"))
+        return 1;
+    auto *dataEntry = dynamic_cast<juce::Slider *>(
+        editor->findChildWithID("data-entry-slider"));
+    auto *volume = dynamic_cast<juce::Slider *>(
+        editor->findChildWithID("volume-slider"));
+    if (!dataEntry || !volume || !dataEntry->isEnabled() ||
+        dataEntry->getMouseClickGrabsKeyboardFocus())
+        return 1;
+    dataEntry->setValue(1023, juce::sendNotificationSync);
+    if (dataEntry->getValue() != 1023) return 1;
+    if (!editor->keyPressed(juce::KeyPress(juce::KeyPress::upKey)) ||
+        !editor->keyPressed(juce::KeyPress(juce::KeyPress::downKey)) ||
+        !editor->keyPressed(juce::KeyPress(juce::KeyPress::leftKey)) ||
+        !editor->keyPressed(juce::KeyPress(juce::KeyPress::rightKey)) ||
+        editor->keyPressed(juce::KeyPress('A')))
+        return 1;
+    editor->focusLost(juce::Component::focusChangedDirectly);
 
     const auto snapshot = editor->createComponentSnapshot(editor->getLocalBounds());
     if (!snapshot.isValid() || snapshot.getWidth() != editor->getWidth() ||

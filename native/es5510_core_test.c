@@ -31,6 +31,25 @@ int main(void) {
     assert(core.frames == 1);
     assert(core.instructions_executed == 3);
 
+    /* Saturating positive overflow produces MAX with V set, but it must not
+       retain the wrapped result's N flag. Conditional distortion programs
+       use these flags in their following skippable instructions. */
+    es5510_core_init(&core);
+    core.gpr[0] = 0x7fffff;
+    core.gpr[1] = 1;
+    core.instruction[0] = instruction(0xff, 0xff, 1, 0, 0, 0);
+    core.instruction[1] = instruction(0xff, 0xff, 0xff, 0xff, 15, 0);
+    es5510_core_set_halted(&core, 0);
+    es5510_core_process(&core, input, output);
+    assert(core.gpr[0] == 0x7fffff);
+    assert((core.ccr & (0x80 | 0x20 | 0x08)) == 0x20);
+
+    /* External DRAM addresses are left-justified in the 24-bit DADR and
+       base-register words. MEMSIZ selects their implemented address bits. */
+    es5510_core_write_reg(&core, 0xf4, 0x0000ff);
+    assert(es5510_core_dram_address(&core, 0x3dfe00) == 0x3dfe);
+    assert(es5510_core_dram_address(&core, 0x3eff00) == 0x3eff);
+
     puts("ES5510 core OK");
     return 0;
 }

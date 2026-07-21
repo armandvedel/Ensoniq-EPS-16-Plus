@@ -39,6 +39,18 @@ int main(int argc, char **argv) {
         fprintf(stderr, "unexpected restored display: |%s|\n", display);
         return 1;
     }
+    int cursor_start = -1;
+    int cursor_end = -1;
+    eps16_probe_machine_cursor(&cursor_start, &cursor_end);
+    if (cursor_start != 5 || cursor_end != 21) {
+        fprintf(stderr, "unexpected restored VFD field: %d..%d\n",
+                cursor_start, cursor_end);
+        return 1;
+    }
+    if (eps16_probe_machine_cursor_segment_mask()) {
+        fprintf(stderr, "plain MODE field restored visible cursor segments\n");
+        return 1;
+    }
     eps16_probe_machine_midi(0x80, 60, 0);
     eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 1000000);
     eps16_probe_machine_midi(0x90, 60, 100);

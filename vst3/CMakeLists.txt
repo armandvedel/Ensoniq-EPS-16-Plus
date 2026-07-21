@@ -1,5 +1,5 @@
 if(NOT APPLE)
-  message(FATAL_ERROR "The first EPS-16 Plus VST3 prototype supports macOS only")
+  message(FATAL_ERROR "The first EPS-16 Plus plug-in prototype supports macOS only")
 endif()
 
 set(EPS16_JUCE_DIR "${CMAKE_SOURCE_DIR}/work/deps/JUCE" CACHE PATH
@@ -114,6 +114,7 @@ add_library(eps16_probe_machine STATIC
   ../native/m68hc11_core.c
   ../native/es5505_core.c
   ../native/es5510_core.c
+  ../native/sampling_input_circuit.c
   ../native/hfe_disk.c
 )
 target_include_directories(eps16_probe_machine PUBLIC
@@ -127,7 +128,7 @@ juce_add_plugin(Eps16Plus
   BUNDLE_ID "org.eps16plus.prototype"
   PLUGIN_MANUFACTURER_CODE EnIQ
   PLUGIN_CODE Ep16
-  FORMATS VST3
+  FORMATS AU VST3
   PRODUCT_NAME "EPS-16 Plus Prototype"
   IS_SYNTH TRUE
   NEEDS_MIDI_INPUT TRUE
@@ -173,6 +174,23 @@ add_custom_target(eps16_vst3_package
   COMMENT "Creating verified arm64 VST3 package"
 )
 
+add_custom_target(eps16_au_package
+  COMMAND "${CMAKE_COMMAND}"
+          "-DSOURCE_BUNDLE=$<TARGET_BUNDLE_DIR:Eps16Plus_AU>"
+          "-DPACKAGE_DIR=${CMAKE_BINARY_DIR}/au-package"
+          "-DRESOURCE_README=${CMAKE_CURRENT_SOURCE_DIR}/ResourceFolder-README.txt"
+          "-DBUNDLE_EXTENSION=component"
+          "-DARCHIVE_NAME=EPS-16-Plus-Prototype-AU-arm64.zip"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/PackageMac.cmake"
+  DEPENDS Eps16Plus_AU
+  VERBATIM
+  COMMENT "Creating verified arm64 Audio Unit package"
+)
+
+add_custom_target(eps16_plugin_packages
+  DEPENDS eps16_vst3_package eps16_au_package
+)
+
 add_executable(eps16_vst3_bridge_test BridgeTest.cpp)
 target_link_libraries(eps16_vst3_bridge_test PRIVATE eps16_vst3_bridge)
 target_compile_options(eps16_vst3_bridge_test PRIVATE -Wall -Wextra -Wpedantic)
@@ -190,6 +208,16 @@ add_test(NAME vst3_bandlimited_resampler
 
 add_executable(eps16_probe_machine_test ProbeMachineTest.c)
 target_link_libraries(eps16_probe_machine_test PRIVATE eps16_probe_machine)
+
+add_executable(eps16_disk_load_workflow_test
+  DiskLoadWorkflowTest.cpp
+  ProbeMachineSink.cpp
+  BandlimitedResampler.cpp
+)
+target_link_libraries(eps16_disk_load_workflow_test PRIVATE
+  eps16_vst3_bridge
+  eps16_probe_machine
+)
 
 add_executable(eps16_indicator_map_probe IndicatorMapProbe.c)
 target_link_libraries(eps16_indicator_map_probe PRIVATE eps16_probe_machine)

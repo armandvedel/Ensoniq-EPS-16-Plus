@@ -100,8 +100,14 @@ The combined 128 KiB ROM has SHA-256
   unknown buttons and logs the complete four-byte click packet.
 - VOLUME uses the ES5505 analog path. DATA ENTRY is analog input channel 3.
   The EPS board does not select it from the DUART's low three output bits;
-  the original ROM polls it during the automatically-driven `OPR 0x9x`
-  scanner phase and scales it to the service manual's 0..255 "MR. KNOB"
+  the original ROM polls it during the automatically-driven scanner phase
+  `OPR & 0x70 = 0x10`. `OP7` independently controls the sampling board's
+  LINE/MIC path, so both `0x9x` (LINE) and `0x1x` (MIC) select DATA ENTRY.
+  Including `OP7` in the phase decode made every MIC scanner read fall through
+  to the reference channel, which corrupted the OS-created voice volume and
+  pitch after recording. Masking only `OP4-OP6` preserves the scanner while
+  leaving LINE/MIC entirely under original-OS control. The ROM scales it to
+  the service manual's 0..255 "MR. KNOB"
   range. Treating the low bits as a mux selected channel 7/reference after
   boot, which explained the false layer errors during fast movement. The
   ROM's calibrated electrical span is raw ADC 28..687 (`0x0700` is zero).
@@ -234,23 +240,39 @@ still be promoted only through independent state-transition tests.
 
 The EPS-16 Plus OS writes ES5510 Host Serial Control `0x48`: Sony serial
 format, with SER1 configured as the output and SER0, SER2, and SER3 configured
-as inputs.  Its loaded 89-instruction effect program agrees with that hardware
-configuration: it reads the three input ports and writes its result to
-SER1L/SER1R.  The audio pump therefore feeds ES5505 Bus1..3 to SER0/SER2/SER3
-and sends the OS-selected SER1 output to the main DAC; Aux1 remains separate.
+as inputs. Its effect programs agree with that hardware configuration: they
+read the three input ports and write their result to SER1L/SER1R. ES5505
+Bus1..3 feed SER0/SER2/SER3, the OS-selected SER1 output feeds the main DAC,
+and Aux1 remains separate.
 A deterministic original-OS instrument run now measures ES5505 Bus1 peak
 `44697` and nonzero ESP output peak `3527` (previously exactly zero), with no
 illegal 68000 instructions.  This verifies the digital route, but audible
 effect character still requires a live user check.
 
 The sampling overlay polls ES5510 GPR `0x80` as a 16-bit input sample followed
-by a low-byte valid marker. Because ES5510 instruction execution is not yet
-present, an untouched all-zero GPR left the OS waiting forever at `ffe41c`.
-The host model exposes a completed silent conversion when no input is active.
-With browser microphone input enabled, Web Audio supplies native-rate PCM to a
-bounded ring. The device layer must convert that stream to the sampling rate
-selected by the original OS and pace the GPR 80 valid marker accordingly;
-allocation and writes into sample RAM remain original-OS work.
+by a low-byte valid marker. The ADC enters ES5510 serial input 0. The original
+sampling overlay loads its independently selectable cutoff coefficients into
+GPR `3b..69`, executes the uploaded program once per conversion and leaves the
+filtered 24-bit result in GPR `80`; the host-visible low byte remains the
+conversion-ready marker. The normal DAC-rate ESP pass is suspended while that
+overlay is driven by ADC conversions, because injecting additional zero serial
+samples changes the filter response. Allocation and sample-RAM writes remain
+original-OS work.
+
+Before that digital program, the input follows analog schematic sheet 3. The
+TL072/CD4053 feedback network gives LINE a DC gain of approximately `2.2874`
+and MIC approximately `57.5868`, a relative MIC sensitivity of `25.1758x`.
+The plug-in boundary retains the physical LINE gain rather than normalizing it
+away: the original ES5510 sampling program has its own passband scaling, and
+normalizing before it discarded the circuit's approximately 7.2 dB LINE gain.
+`C128=100pF`
+in parallel with `R137=220k` supplies the high-frequency shelf. The following
+two buffered filter sections are solved as complete loaded third-order
+networks using `R=1.78k`, `C0=4700pF`, `C2=470pF`, and two parallel `8200pF`
+feedback capacitors per section. They must not be split into an independent RC
+plus Sallen-Key approximation. The circuit runs at 2x/4x DAW rate where
+required and is part of the checksummed machine snapshot. Unmeasured noise and
+guessed op-amp coloration are deliberately omitted.
 
 The sampling overlay communicates that selection through ES5510 GPR `0x81`,
 not through the browser. Selectors `8..2` choose conversion dividers
@@ -354,12 +376,34 @@ delay RAM. ES5505 Bus1, Bus2, and Bus3 feed ES5510 serial inputs 0, 2, and 3;
 the OS-configured serial output 1 feeds the main EPS DAC. The fourth ES5505
 assignment is the separate Aux1 pair. This is device-side routing rather than
 a browser reverb substitute.
+During effects, Host Serial Control `48` configures serial port 1 as the main
+DAC output while ports 0, 2, and 3 accept the three ES5505 effect buses. During
+sampling, the uploaded overlay instead consumes the mono ADC at serial input 0
+and writes its filtered result to GPR `80` for the CPU. The hardware's automatic
+sampling monitor remains a separate board route. In the VST adapter it is
+active only while the original OS performs current GPR `80` conversions, is
+sent equally to both main outputs, follows the same analog MIC/LINE frontend,
+and then follows the physical master-volume ADC.
 The ES5510 host interface also holds execution during an instruction upload and
 its verifier readback; otherwise the running DSP can legally rewrite a GPR
 between two host reads and make the original OS report `EFFECT DOWNLOAD
 FAILED`. Unit tests cover ES5505 channel assignment and the delayed ES5510 ALU
-write pipeline. Audible reverb/send behavior is still pending a live recorded-
-sample verification and must not yet be described as complete.
+write pipeline. The machine regression records a sample through the original
+OS and verifies the complete voice/bus/ESP/DAC path for ROM effects 10..13.
+
+ROM effects 11 (`CMP+DIST+REV`) and 13 (`WAH+DIST+REV`) exposed two ES5510
+state errors because, unlike the neighboring programs, both use conditional
+instructions after saturating arithmetic and A/B-table reads. Saturation now
+updates N/Z to describe the saturated result instead of the wrapped 24-bit
+intermediate. The host's Halt Enable sequence is also honored before Host
+Control bit 1 clears external delay RAM, so an effect no longer inherits
+arbitrary table contents from the previous program. ROM 11/13 also download
+514 lookup-table words through DADR. DADR is left-justified and must pass
+through the current MEMSIZ mask/shift just like ABASE/BBASE accesses; treating
+it as a raw 20-bit index stored the tables at `dfe00..` while the programs read
+`03dfe..`. The focused unit test verifies that `3dfe00` maps to `03dfe` for
+`MEMSIZ=0000ff`. The original-OS recording regression now produces distinct,
+nonzero ESP returns for `10,11,12,13,11,10` without changing bus routing.
 
 The normal live ENTER click produces the verified press/hold/release panel
 packet. Actual recording is activated by the ENTER release edge, while an

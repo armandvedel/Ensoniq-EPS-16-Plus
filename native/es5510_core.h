@@ -51,6 +51,8 @@ uint32_t es5510_core_read_reg(Es5510Core *core, uint8_t reg);
 void es5510_core_write_reg(Es5510Core *core, uint8_t reg, uint32_t value);
 void es5510_core_set_halted(Es5510Core *core, int halted);
 void es5510_core_set_host_serial(Es5510Core *core, uint8_t value);
+unsigned int es5510_core_dram_address(const Es5510Core *core,
+                                      uint32_t address);
 void es5510_core_process(Es5510Core *core, const int16_t inputs[8],
                          int16_t outputs[2]);
 

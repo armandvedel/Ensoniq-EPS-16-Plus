@@ -5,10 +5,11 @@
 /* Compile the verified probe into the private VST translation unit while
    selecting an explicit core context for every plug-in instance. */
 static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
-                                   int cursor_start, int cursor_end);
+                                   int cursor_start, int cursor_end,
+                                   uint32_t cursor_mask);
 
-#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
-    plugin_capture_display((display), (decimal_mask), (cursor_start), (cursor_end))
+#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end, cursor_mask) \
+    plugin_capture_display((display), (decimal_mask), (cursor_start), (cursor_end), (cursor_mask))
 #define EPS16_ROM_PROBE_CONTEXT 1
 #define main eps16_probe_cli_main
 #include "../native/rom_probe.c"
@@ -37,6 +38,8 @@ typedef struct {
     size_t panel_pair_count;
     char published_display[23];
     uint32_t published_decimal_mask;
+    uint32_t published_cursor_mask;
+    int published_cursor_start, published_cursor_end;
 } PluginRuntimeState;
 
 struct Eps16ProbeMachine {
@@ -66,14 +69,22 @@ static _Thread_local Eps16ProbeMachine *plugin_current_machine;
 #define plugin_published_display (plugin_current_machine->plugin.published_display)
 #define plugin_published_decimal_mask \
     (plugin_current_machine->plugin.published_decimal_mask)
+#define plugin_published_cursor_mask \
+    (plugin_current_machine->plugin.published_cursor_mask)
+#define plugin_published_cursor_start \
+    (plugin_current_machine->plugin.published_cursor_start)
+#define plugin_published_cursor_end \
+    (plugin_current_machine->plugin.published_cursor_end)
 
 static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
-                                   int cursor_start, int cursor_end) {
-    (void)cursor_start;
-    (void)cursor_end;
+                                   int cursor_start, int cursor_end,
+                                   uint32_t cursor_mask) {
     if (!plugin_current_machine) return;
     memcpy(plugin_published_display, display, 23);
     plugin_published_decimal_mask = decimal_mask;
+    plugin_published_cursor_mask = cursor_mask;
+    plugin_published_cursor_start = cursor_start;
+    plugin_published_cursor_end = cursor_end;
 }
 
 #define PLUGIN_SNAPSHOT_FIELDS(X) \
@@ -126,12 +137,23 @@ static void plugin_capture_display(const char display[23], uint32_t decimal_mask
     X(panel_indicator_on) X(panel_indicator_flash) \
     X(panel_indicator_command_pending)
 
+#define PLUGIN_SNAPSHOT_V3_FIELDS(X) \
+    X(sampling_input_circuit)
+
+#define PLUGIN_SNAPSHOT_V4_FIELDS(X) \
+    X(panel_cursor_segment_mask) X(panel_cursor_full_segments) \
+    X(plugin_published_display) X(plugin_published_decimal_mask) \
+    X(plugin_published_cursor_mask) X(plugin_published_cursor_start) \
+    X(plugin_published_cursor_end)
+
 Eps16ProbeMachine *eps16_probe_machine_create(void) {
     Eps16ProbeMachine *machine = calloc(1, sizeof(*machine));
     if (!machine) return NULL;
     rom_probe_state_defaults(&machine->core);
     memset(machine->plugin.published_display, ' ', 22);
     machine->plugin.published_display[22] = '\0';
+    machine->plugin.published_cursor_start = -1;
+    machine->plugin.published_cursor_end = -1;
     return machine;
 }
 
@@ -241,6 +263,16 @@ static void plugin_render_audio(uint64_t elapsed_cycles, uint64_t end_cycle) {
         audio_frames += chunk;
         frames_due -= chunk;
         for (size_t frame = 0; frame < chunk; ++frame) {
+            for (unsigned int bus = 0; bus < ES5505_STEREO_BUSES; ++bus) {
+                int32_t magnitude = buses[bus * 2][frame] < 0
+                    ? -buses[bus * 2][frame] : buses[bus * 2][frame];
+                if (magnitude > es5505_bus_peak[bus])
+                    es5505_bus_peak[bus] = magnitude;
+                magnitude = buses[bus * 2 + 1][frame] < 0
+                    ? -buses[bus * 2 + 1][frame] : buses[bus * 2 + 1][frame];
+                if (magnitude > es5505_bus_peak[bus])
+                    es5505_bus_peak[bus] = magnitude;
+            }
             const int16_t esp_inputs[8] = {
                 audio_to_pcm16(buses[0][frame]),
                 audio_to_pcm16(buses[1][frame]),
@@ -250,17 +282,34 @@ static void plugin_render_audio(uint64_t elapsed_cycles, uint64_t end_cycle) {
                 audio_to_pcm16(buses[4][frame]),
                 audio_to_pcm16(buses[5][frame])
             };
-            int16_t esp_outputs[2];
+            int16_t esp_outputs[2] = {0, 0};
             if (es5510_host_upload_active &&
                 (uint64_t)current_cycle >= es5510_host_access_until) {
                 es5510_host_upload_active = 0;
                 es5510_core_set_halted(&es5510, 0);
             }
-            es5510_core_process(&es5510, esp_inputs, esp_outputs);
+            /* The sampling overlay is clocked by ADC conversions below. An
+               additional DAC-rate run would inject false serial-input zeros
+               between samples and change its anti-alias response. */
+            if (!sampling_adc_is_active())
+                es5510_core_process(&es5510, esp_inputs, esp_outputs);
+            int32_t esp_magnitude = esp_outputs[0] < 0
+                ? -(int32_t)esp_outputs[0] : (int32_t)esp_outputs[0];
+            if (esp_magnitude > es5510_return_peak)
+                es5510_return_peak = esp_magnitude;
+            esp_magnitude = esp_outputs[1] < 0
+                ? -(int32_t)esp_outputs[1] : (int32_t)esp_outputs[1];
+            if (esp_magnitude > es5510_return_peak)
+                es5510_return_peak = esp_magnitude;
             const int32_t output_left =
                 apply_master_volume((int32_t)esp_outputs[0] << 4);
             const int32_t output_right =
                 apply_master_volume((int32_t)esp_outputs[1] << 4);
+            int32_t output_magnitude = output_left < 0
+                ? -output_left : output_left;
+            if (output_magnitude > audio_peak) audio_peak = output_magnitude;
+            output_magnitude = output_right < 0 ? -output_right : output_right;
+            if (output_magnitude > audio_peak) audio_peak = output_magnitude;
             plugin_output_left = (float)audio_to_pcm16(output_left) / 32768.0f;
             plugin_output_right = (float)audio_to_pcm16(output_right) / 32768.0f;
             plugin_queue_audio(frame_cycle, output_divider,
@@ -300,6 +349,9 @@ int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
     memset(plugin_published_display, ' ', 22);
     plugin_published_display[22] = '\0';
     plugin_published_decimal_mask = 0;
+    plugin_published_cursor_mask = 0;
+    plugin_published_cursor_start = -1;
+    plugin_published_cursor_end = -1;
 
     m68k_init();
     es5505_core_init(&es5505, es5505_sample_read, NULL);
@@ -314,6 +366,65 @@ int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
     plugin_initialized = 1;
     if (error && error_size) error[0] = '\0';
     return 1;
+}
+
+int eps16_probe_machine_insert_disk(const char *disk_path,
+                                    char *error, size_t error_size) {
+    if (!plugin_initialized) {
+        plugin_error(error, error_size, "machine is not initialized");
+        return 0;
+    }
+    if (!disk_path || !*disk_path || !load_disk(disk_path)) {
+        plugin_error(error, error_size,
+                     "disk must be a valid EPS .IMG or HFE v1 image");
+        return 0;
+    }
+    disk_change_pending = 1;
+    fdc_track = 0;
+    fdc_physical_track = 0;
+    fdc_sector = 0;
+    fdc_remaining = 0;
+    if (error && error_size) error[0] = '\0';
+    return 1;
+}
+
+int eps16_probe_machine_create_blank_disk(char *error, size_t error_size) {
+    if (!plugin_initialized) {
+        plugin_error(error, error_size, "machine is not initialized");
+        return 0;
+    }
+    if (!eps16_disk_create_blank(disk_image, sizeof(disk_image))) {
+        plugin_error(error, error_size, "cannot create blank EPS disk");
+        return 0;
+    }
+    disk_loaded = 1;
+    disk_change_pending = 1;
+    fdc_track = 0;
+    fdc_physical_track = 0;
+    fdc_sector = 0;
+    fdc_remaining = 0;
+    if (error && error_size) error[0] = '\0';
+    return 1;
+}
+
+int eps16_probe_machine_save_disk(const char *disk_path, int hfe_format,
+                                  char *error, size_t error_size) {
+    if (!plugin_initialized || !disk_loaded) {
+        plugin_error(error, error_size, "no disk is inserted");
+        return 0;
+    }
+    if (!disk_path || !*disk_path) {
+        plugin_error(error, error_size, "disk output path is empty");
+        return 0;
+    }
+    if (fdc_remaining && (fdc_last_command & 0xe0) == 0xa0) {
+        plugin_error(error, error_size,
+                     "disk write is still in progress; try Save again");
+        return 0;
+    }
+    return eps16_disk_save(disk_path, disk_image, sizeof(disk_image),
+                           hfe_format ? EPS16_DISK_HFE : EPS16_DISK_IMG,
+                           error, error_size);
 }
 
 int eps16_probe_machine_is_initialized(void) {
@@ -377,7 +488,8 @@ void eps16_probe_machine_run_until(uint64_t target_cycle) {
     if (panel_display_dirty &&
         current_cycle - panel_display_last_change_cycle >= 100000) {
         plugin_capture_display(panel_display, panel_display_decimal_mask,
-                               panel_cursor_start, panel_cursor_end);
+                               panel_cursor_start, panel_cursor_end,
+                               panel_cursor_segment_mask);
         panel_display_dirty = 0;
     }
 }
@@ -417,12 +529,25 @@ void eps16_probe_machine_analog(unsigned int channel, uint16_t value) {
     analog_values[channel] = (uint16_t)((value > 1023 ? 1023 : value) << 6);
 }
 
-void eps16_probe_machine_sampling_input(float left, float right) {
+void eps16_probe_machine_sampling_input_rate(double sample_rate) {
+    if (!plugin_current_machine) return;
+    sampling_input_circuit_set_rate(&sampling_input_circuit, sample_rate);
+}
+
+float eps16_probe_machine_sampling_input(float left, float right) {
+    if (!plugin_initialized) return 0.0f;
     float mono = 0.5f * (left + right);
     if (mono > 1.0f) mono = 1.0f;
     if (mono < -1.0f) mono = -1.0f;
-    plugin_input_sample = (int16_t)lrintf(mono * 32767.0f);
+    const float filtered = sampling_input_circuit_process(
+        &sampling_input_circuit, mono, low_ram[0x0211] == 0);
+    plugin_input_sample = (int16_t)lrintf(filtered * 32767.0f);
     plugin_input_valid = 1;
+    return filtered;
+}
+
+int eps16_probe_machine_sampling_mic_input(void) {
+    return plugin_initialized && low_ram[0x0211] == 0;
 }
 
 void eps16_probe_machine_stereo_output(float *left, float *right) {
@@ -439,6 +564,10 @@ uint32_t eps16_probe_machine_decimal_mask(void) {
     return plugin_published_decimal_mask & 0x3fffffU;
 }
 
+uint32_t eps16_probe_machine_cursor_segment_mask(void) {
+    return plugin_published_cursor_mask & 0x3fffffU;
+}
+
 uint16_t eps16_probe_machine_indicator_on(unsigned int bank) {
     return bank < 3 ? panel_indicator_on[bank] : 0;
 }
@@ -447,9 +576,22 @@ uint16_t eps16_probe_machine_indicator_flash(unsigned int bank) {
     return bank < 3 ? panel_indicator_flash[bank] : 0;
 }
 
+int eps16_probe_machine_sampling_monitor_active(void) {
+    if (!plugin_initialized || !plugin_input_valid ||
+        !es5510_input_last_poll_cycle)
+        return 0;
+    const uint64_t now = bus_cycle_now();
+    return now >= es5510_input_last_poll_cycle &&
+           now - es5510_input_last_poll_cycle <= 10000;
+}
+
+unsigned int eps16_probe_machine_master_volume(void) {
+    return plugin_initialized ? analog_values[5] >> 6 : 0;
+}
+
 void eps16_probe_machine_cursor(int *start, int *end) {
-    if (start) *start = panel_cursor_start;
-    if (end) *end = panel_cursor_end;
+    if (start) *start = plugin_published_cursor_start;
+    if (end) *end = plugin_published_cursor_end;
 }
 
 uint64_t eps16_probe_machine_cycles(void) {
@@ -468,13 +610,34 @@ uint64_t eps16_probe_machine_sampling_input_conversions(void) {
     return es5510_input_valid;
 }
 
+void eps16_probe_machine_reset_audio_peaks(void) {
+    memset(es5505_bus_peak, 0, sizeof(es5505_bus_peak));
+    es5510_return_peak = 0;
+    audio_peak = 0;
+}
+
+float eps16_probe_machine_es5505_bus_peak(unsigned int bus) {
+    if (bus >= ES5505_STEREO_BUSES) return 0.0f;
+    return (float)es5505_bus_peak[bus] / 524288.0f;
+}
+
+float eps16_probe_machine_es5510_return_peak(void) {
+    return (float)es5510_return_peak / 32768.0f;
+}
+
+float eps16_probe_machine_output_peak(void) {
+    return (float)audio_peak / 524288.0f;
+}
+
 size_t eps16_probe_machine_state_size(void) {
     if (!plugin_initialized) return 0;
 #define SNAPSHOT_FIELD_SIZE(name) + sizeof(name)
     return sizeof(PluginSnapshotHeader) + sizeof(Es5505Core) +
            sizeof(KpcDevice) + m68k_context_size()
            PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_FIELD_SIZE)
-           PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_FIELD_SIZE);
+           PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_FIELD_SIZE)
+           PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_FIELD_SIZE)
+           PLUGIN_SNAPSHOT_V4_FIELDS(SNAPSHOT_FIELD_SIZE);
 #undef SNAPSHOT_FIELD_SIZE
 }
 
@@ -484,7 +647,7 @@ int eps16_probe_machine_save_state(void *data, size_t size) {
     memset(data, 0, size);
     PluginSnapshotHeader *header = (PluginSnapshotHeader *)data;
     memcpy(header->magic, "EPS16ST\0", 8);
-    header->version = 2;
+    header->version = 4;
     header->header_size = sizeof(*header);
     header->total_size = size;
     header->m68k_context_size = m68k_context_size();
@@ -503,6 +666,8 @@ int eps16_probe_machine_save_state(void *data, size_t size) {
 #define SNAPSHOT_SAVE_FIELD(name) snapshot_write(&writer, &(name), sizeof(name));
     PLUGIN_SNAPSHOT_FIELDS(SNAPSHOT_SAVE_FIELD)
     PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_SAVE_FIELD)
+    PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_SAVE_FIELD)
+    PLUGIN_SNAPSHOT_V4_FIELDS(SNAPSHOT_SAVE_FIELD)
 #undef SNAPSHOT_SAVE_FIELD
 
     Es5505Core saved_es5505 = es5505;
@@ -553,14 +718,24 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     }
     PluginSnapshotHeader header;
     memcpy(&header, data, sizeof(header));
-    const size_t expected_v2 = eps16_probe_machine_state_size();
+    const size_t expected_v4 = eps16_probe_machine_state_size();
+#define SNAPSHOT_V4_FIELD_SIZE(name) - sizeof(name)
+    const size_t expected_v3 = expected_v4
+        PLUGIN_SNAPSHOT_V4_FIELDS(SNAPSHOT_V4_FIELD_SIZE);
+#undef SNAPSHOT_V4_FIELD_SIZE
+#define SNAPSHOT_V3_FIELD_SIZE(name) - sizeof(name)
+    const size_t expected_v2 = expected_v3
+        PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_V3_FIELD_SIZE);
+#undef SNAPSHOT_V3_FIELD_SIZE
 #define SNAPSHOT_V2_FIELD_SIZE(name) - sizeof(name)
     const size_t expected_v1 = expected_v2
         PLUGIN_SNAPSHOT_V2_FIELDS(SNAPSHOT_V2_FIELD_SIZE);
 #undef SNAPSHOT_V2_FIELD_SIZE
-    const size_t expected = header.version == 1 ? expected_v1 : expected_v2;
+    const size_t expected = header.version == 1 ? expected_v1
+                          : header.version == 2 ? expected_v2
+                          : header.version == 3 ? expected_v3 : expected_v4;
     if (memcmp(header.magic, "EPS16ST\0", 8) ||
-        (header.version != 1 && header.version != 2) ||
+        (header.version < 1 || header.version > 4) ||
         header.header_size != sizeof(header) || header.total_size != size ||
         size != expected || header.m68k_context_size != m68k_context_size()) {
         plugin_error(error, error_size, "machine snapshot format is incompatible");
@@ -582,6 +757,7 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     const Es5505PortReader port_reader = es5505.port_reader;
     void *const port_context = es5505.port_context;
     const KpcFirmware device_firmware = kpc_device.firmware;
+    const double configured_input_rate = sampling_input_circuit.sample_rate;
     void *const kpc_memory_context = kpc_device.cpu.memory_context;
     const M68hc11Read8 kpc_read8 = kpc_device.cpu.read8;
     const M68hc11Write8 kpc_write8 = kpc_device.cpu.write8;
@@ -596,7 +772,27 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
         memset(panel_indicator_flash, 0, sizeof(panel_indicator_flash));
         panel_indicator_command_pending = 0;
     }
+    if (header.version >= 3) {
+        PLUGIN_SNAPSHOT_V3_FIELDS(SNAPSHOT_LOAD_FIELD)
+        if (configured_input_rate >= 8000.0 &&
+            fabs(sampling_input_circuit.sample_rate - configured_input_rate) >
+                0.5)
+            sampling_input_circuit_set_rate(&sampling_input_circuit,
+                                            configured_input_rate);
+    } else {
+        sampling_input_circuit_init(&sampling_input_circuit,
+            configured_input_rate >= 8000.0 ? configured_input_rate : 48000.0);
+    }
+    if (header.version >= 4) {
+        PLUGIN_SNAPSHOT_V4_FIELDS(SNAPSHOT_LOAD_FIELD)
+    } else {
+        panel_cursor_segment_mask = 0;
+        panel_cursor_full_segments = 0;
+    }
 #undef SNAPSHOT_LOAD_FIELD
+    /* Threshold parsing is transient panel transport state and intentionally
+       does not change the version-1/version-2 machine snapshot layout. */
+    panel_threshold_position = -1;
     snapshot_read(&reader, &es5505, sizeof(es5505));
     snapshot_read(&reader, &kpc_device, sizeof(kpc_device));
     if (!reader.valid ||
@@ -623,10 +819,16 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     restored_cpu.instr_hook_callback = current_cpu.instr_hook_callback;
     m68k_set_context(&restored_cpu);
 
-    /* Version-1/2 snapshots already contain the decoder state.  Publish that
-       completed state immediately without changing the snapshot format. */
-    memcpy(plugin_published_display, panel_display, 23);
-    plugin_published_decimal_mask = panel_display_decimal_mask;
+    /* Version 4 stores the completed published VFD state independently of
+       transient parser state.  Older snapshots derive it from their decoder
+       fields and safely restore the previously unknown segment mask as off. */
+    if (header.version < 4) {
+        memcpy(plugin_published_display, panel_display, 23);
+        plugin_published_decimal_mask = panel_display_decimal_mask;
+        plugin_published_cursor_mask = 0;
+        plugin_published_cursor_start = panel_cursor_start;
+        plugin_published_cursor_end = panel_cursor_end;
+    }
 
     es5505.sample_reader = sample_reader;
     es5505.sample_context = sample_context;

@@ -1,14 +1,21 @@
 if(NOT DEFINED SOURCE_BUNDLE OR NOT EXISTS "${SOURCE_BUNDLE}")
-  message(FATAL_ERROR "SOURCE_BUNDLE does not name a built VST3 bundle")
+  message(FATAL_ERROR "SOURCE_BUNDLE does not name a built plug-in bundle")
 endif()
 if(NOT DEFINED PACKAGE_DIR)
   message(FATAL_ERROR "PACKAGE_DIR is required")
 endif()
 
+if(NOT DEFINED BUNDLE_EXTENSION)
+  set(BUNDLE_EXTENSION "vst3")
+endif()
+if(NOT DEFINED ARCHIVE_NAME)
+  set(ARCHIVE_NAME "EPS-16-Plus-Prototype-arm64.zip")
+endif()
+
 set(STAGE "${PACKAGE_DIR}/EPS-16 Plus Prototype.stage")
-set(FINAL "${PACKAGE_DIR}/EPS-16 Plus Prototype.vst3")
+set(FINAL "${PACKAGE_DIR}/EPS-16 Plus Prototype.${BUNDLE_EXTENSION}")
 set(RESOURCES "${PACKAGE_DIR}/EPS_files")
-set(ARCHIVE "${PACKAGE_DIR}/EPS-16-Plus-Prototype-arm64.zip")
+set(ARCHIVE "${PACKAGE_DIR}/${ARCHIVE_NAME}")
 file(REMOVE_RECURSE "${PACKAGE_DIR}")
 file(MAKE_DIRECTORY "${PACKAGE_DIR}")
 
@@ -32,7 +39,7 @@ file(MAKE_DIRECTORY "${RESOURCES}")
 configure_file("${RESOURCE_README}" "${RESOURCES}/README.txt" COPYONLY)
 execute_process(
   COMMAND /usr/bin/zip -qry -X "${ARCHIVE}"
-          "EPS-16 Plus Prototype.vst3" "EPS_files"
+          "EPS-16 Plus Prototype.${BUNDLE_EXTENSION}" "EPS_files"
   WORKING_DIRECTORY "${PACKAGE_DIR}"
   RESULT_VARIABLE ZIP_RESULT
 )

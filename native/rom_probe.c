@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,6 +13,7 @@
 #include "kpc_device.h"
 #include "kpc_firmware.h"
 #include "kpc_legacy.h"
+#include "sampling_input_circuit.h"
 #include "live_host.h"
 #include "m68k.h"
 
@@ -123,6 +125,7 @@ typedef struct {
     uint64_t es5510_input_last_poll_time_ns, es5510_input_last_poll_cycle;
     uint64_t es5510_input_polls, es5510_input_valid, es5510_input_bypass;
     uint64_t sample_record_input_valid_start, sample_record_write_start;
+    SamplingInputCircuit sampling_input_circuit;
     unsigned int function_code;
     uint8_t duart_registers[16];
     uint8_t panel_rx[PANEL_RX_SIZE];
@@ -142,7 +145,10 @@ typedef struct {
     size_t panel_cursor;
     int panel_cursor_start, panel_cursor_end, panel_cursor_active;
     int panel_cursor_width_pending, panel_cursor_width_known;
+    uint32_t panel_cursor_segment_mask;
+    int panel_cursor_full_segments;
     int panel_noncell_parameter_pending;
+    int panel_threshold_position;
     uint16_t panel_indicator_on[3], panel_indicator_flash[3];
     uint8_t panel_indicator_command_pending, panel_last_tx;
     int panel_pick_instrument_seen, panel_file_loaded_seen;
@@ -151,7 +157,7 @@ typedef struct {
     uint8_t fdc_track, fdc_physical_track, fdc_sector, fdc_data_register;
     uint8_t fdc_last_command;
     int load_trace_enabled, fdc_step_direction;
-    const uint8_t *fdc_data;
+    uint8_t *fdc_data;
     size_t fdc_remaining;
     unsigned int fdc_data_reads;
     uint32_t fdc_read_pcs[16];
@@ -241,6 +247,7 @@ static void rom_probe_state_defaults(RomProbeState *state) {
     state->panel_display[22] = '\0';
     state->panel_cursor_start = -1;
     state->panel_cursor_end = -1;
+    state->panel_threshold_position = -1;
     state->fdc_step_direction = 1;
     state->duart_tx_a_ready = 1;
     state->duart_tx_b_ready = 1;
@@ -252,6 +259,7 @@ static void rom_probe_state_defaults(RomProbeState *state) {
     state->analog_values[5] = 0xffc0;
     state->analog_values[6] = 0x7fc0;
     state->analog_values[7] = 0x5540;
+    sampling_input_circuit_init(&state->sampling_input_circuit, 48000.0);
     state->dmac_irq_channel = -1;
     for (unsigned int channel = 0; channel < 4; ++channel)
         state->dmac_pcl_level[channel] = 1;
@@ -292,6 +300,7 @@ static void rom_probe_state_defaults(RomProbeState *state) {
 #define es5510_input_bypass RP(es5510_input_bypass)
 #define sample_record_input_valid_start RP(sample_record_input_valid_start)
 #define sample_record_write_start RP(sample_record_write_start)
+#define sampling_input_circuit RP(sampling_input_circuit)
 #define function_code RP(function_code)
 #define duart_registers RP(duart_registers)
 #define panel_rx RP(panel_rx)
@@ -319,7 +328,10 @@ static void rom_probe_state_defaults(RomProbeState *state) {
 #define panel_cursor_active RP(panel_cursor_active)
 #define panel_cursor_width_pending RP(panel_cursor_width_pending)
 #define panel_cursor_width_known RP(panel_cursor_width_known)
+#define panel_cursor_segment_mask RP(panel_cursor_segment_mask)
+#define panel_cursor_full_segments RP(panel_cursor_full_segments)
 #define panel_noncell_parameter_pending RP(panel_noncell_parameter_pending)
+#define panel_threshold_position RP(panel_threshold_position)
 #define panel_indicator_on RP(panel_indicator_on)
 #define panel_indicator_flash RP(panel_indicator_flash)
 #define panel_indicator_command_pending RP(panel_indicator_command_pending)
@@ -481,6 +493,29 @@ static uint32_t es5510_sampling_input(void) {
     if ((live_mode || deterministic_host_input) &&
         !live_host_audio_input_sample(target_rate, &input))
         return 0;
+    if (live_mode && !deterministic_host_input) {
+        if (fabs(sampling_input_circuit.sample_rate - target_rate) > 0.5)
+            sampling_input_circuit_set_rate(&sampling_input_circuit,
+                                            (double)target_rate);
+        const float normalized = (float)input / 32768.0f;
+        const float filtered = sampling_input_circuit_process(
+            &sampling_input_circuit, normalized, low_ram[0x0211] == 0);
+        input = (int16_t)lrintf(filtered * 32767.0f);
+    }
+    /* The mono ADC enters ES5510 serial input 0. The original sampling
+       overlay loads its independently selectable cutoff table into GPR
+       3b..69 and writes the filtered 24-bit result to GPR 80. Execute that
+       uploaded program for each completed conversion instead of returning
+       the unfiltered host sample. The host-visible low byte is the ADC-ready
+       indication, not the filter result's fractional byte. */
+    if (!es5510.halted && !es5510_host_upload_active &&
+        selector >= 2 && selector <= 8) {
+        const int16_t inputs[8] = {input, 0, 0, 0, 0, 0, 0, 0};
+        int16_t outputs[2];
+        es5510_core_process(&es5510, inputs, outputs);
+        ++es5510_input_valid;
+        return (es5510_gpr[0x80] & 0xffff00) | 0x01;
+    }
     ++es5510_input_valid;
     return ((uint32_t)(uint16_t)input << 8) | 0x01;
 }
@@ -528,7 +563,7 @@ static void es5510_write_register(uint8_t index, uint32_t value) {
    display annunciator on/off/flash. The next byte is the physical index.
    Keeping the raw banks preserves original OS/KPC ownership of every lamp. */
 #ifndef EPS16_PANEL_DISPLAY_PUBLISHED
-#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end) \
+#define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end, cursor_mask) \
     ((void)0)
 #endif
 
@@ -679,7 +714,17 @@ static unsigned int panel_display_drain_frames(unsigned int code) {
 
 static int sampling_adc_is_active(void) {
     unsigned int selector = es5510_gpr[0x81] & 0xff;
-    return !es5510_host_upload_active && selector >= 2 && selector <= 8;
+    const uint64_t now = bus_cycle_now();
+    const uint64_t poll_age = es5510_input_last_poll_cycle &&
+                              now >= es5510_input_last_poll_cycle
+        ? now - es5510_input_last_poll_cycle : UINT64_MAX;
+    /* GPR 81 is just ordinary program storage outside the sampling overlay;
+       ROM effect 10 happens to leave the same low value as a valid ADC clock
+       selector there. Sampling is therefore identified by the hardware
+       behavior that matters: the OS is actively polling the selected ADC
+       result in GPR 80. */
+    return !es5510_host_upload_active && selector >= 2 && selector <= 8 &&
+           poll_age <= 10000;
 }
 
 static void live_command(const char *line) {
@@ -798,7 +843,8 @@ static void live_command(const char *line) {
         live_quit = 1;
     } else if (!strcmp(line, "display")) {
         EPS16_PANEL_DISPLAY_PUBLISHED(panel_display, panel_display_decimal_mask,
-                                      panel_cursor_start, panel_cursor_end);
+                                      panel_cursor_start, panel_cursor_end,
+                                      panel_cursor_segment_mask);
         live_host_display(panel_display, panel_display_decimal_mask,
                           panel_cursor_start, panel_cursor_end);
     } else {
@@ -824,7 +870,8 @@ static void live_service(void) {
     if (panel_display_dirty &&
         current_cycle - panel_display_last_change_cycle >= 100000) {
         EPS16_PANEL_DISPLAY_PUBLISHED(panel_display, panel_display_decimal_mask,
-                                      panel_cursor_start, panel_cursor_end);
+                                      panel_cursor_start, panel_cursor_end,
+                                      panel_cursor_segment_mask);
         live_host_display(panel_display, panel_display_decimal_mask,
                           panel_cursor_start, panel_cursor_end);
         panel_display_dirty = 0;
@@ -910,15 +957,18 @@ static uint16_t es5505_port_read(void *context) {
        also floppy side-select).  The original ROM's polling loop establishes
        these six stable phases; in particular 0x9x is the 8-bit "MR. KNOB"
        / Data Entry sample. */
-    unsigned int phase = duart_output & 0xf0;
+    /* OP7 selects the sampling board's LINE/MIC feedback path.  The ADC
+       scanner phase is carried only by OP4-OP6, so OP7 must not change the
+       decoded panel-analog channel when the OS selects MIC. */
+    unsigned int phase = duart_output & 0x70;
     unsigned int channel;
     switch (phase) {
-        case 0xf0: channel = 0; break; /* pitch wheel */
-        case 0xb0: channel = 1; break; /* patch select */
-        case 0xe0: channel = 2; break; /* modulation wheel */
-        case 0x90: channel = 3; break; /* Data Entry */
-        case 0xd0: channel = 4; break; /* pedal / control voltage */
-        case 0xa0: channel = 5; break; /* volume */
+        case 0x70: channel = 0; break; /* pitch wheel */
+        case 0x30: channel = 1; break; /* patch select */
+        case 0x60: channel = 2; break; /* modulation wheel */
+        case 0x10: channel = 3; break; /* Data Entry */
+        case 0x50: channel = 4; break; /* pedal / control voltage */
+        case 0x20: channel = 5; break; /* volume */
         default: channel = 7; break;   /* startup/reference phase */
     }
     ++analog_reads[channel];
@@ -950,8 +1000,9 @@ static void es5505_write16(unsigned int address, uint16_t value) {
     }
     if (RP(es5505_trace_writes) &&
         current_cycle >= RP(es5505_trace_start_cycle))
-        printf("es5505_write cycle:%lld page:%02x reg:%x value:%04x\n",
-               current_cycle, es5505.page, reg, value);
+        printf("es5505_write cycle:%lld pc:%06x page:%02x reg:%x value:%04x\n",
+               current_cycle, m68k_get_reg(NULL, M68K_REG_PC) & 0xffffff,
+               es5505.page, reg, value);
     ++es5505_writes;
     es5505_core_write(&es5505, reg, value);
     if (getenv("EPS16_TRACE_ES5505_KEYON") && page_before < 0x20 && reg == 0 &&
@@ -961,10 +1012,12 @@ static void es5505_write16(unsigned int address, uint16_t value) {
         const Es5505Voice *voice = &es5505.voices[page_before];
         fprintf(stderr,
                 "es5505_keyon cycle:%lld voice:%u control:%04x freq:%08x "
-                "start:%08x end:%08x accum:%08x bank:%u\n",
+                "start:%08x end:%08x accum:%08x bank:%u "
+                "left:%02x right:%02x k1:%04x k2:%04x\n",
                 current_cycle, page_before, voice->control, voice->frequency,
                 voice->start, voice->end, voice->accumulator,
-                (voice->control >> 2) & 1);
+                (voice->control >> 2) & 1, voice->left_volume,
+                voice->right_volume, voice->k1, voice->k2);
     }
 }
 
@@ -1017,7 +1070,8 @@ static void es5510_write(unsigned int address, uint8_t value) {
         unsigned int shift = (17 - offset) * 8;
         es5510_dadr_latch = (es5510_dadr_latch & ~(0xffU << shift)) | ((uint32_t)value << shift);
         if (offset == 15) {
-            unsigned int dram_address = es5510_dadr_latch & 0xfffff;
+            unsigned int dram_address =
+                es5510_core_dram_address(&es5510, es5510_dadr_latch);
             if (es5510_ram_read) {
                 es5510_dil_latch = (uint16_t)es5510_dram[dram_address] << 8;
                 ++es5510_dram_reads;
@@ -1026,12 +1080,22 @@ static void es5510_write(unsigned int address, uint8_t value) {
                 ++es5510_dram_writes;
             }
         }
+    } else if (offset == 0x12) {
+        /* Host Control bit 1 clears external delay RAM only while the ESP is
+           halted. Effect downloads assert halt first, then issue 02 before
+           uploading the replacement program. */
+        if ((value & 0x02) && es5510.halted)
+            memset(es5510.dram, 0, sizeof(es5510.dram));
     } else if (offset == 0x14) {
         es5510_ram_read = value & 0x80;
     } else if (offset == 0x18) {
         es5510_host_serial = value;
         ++es5510_host_serial_writes;
         es5510_core_set_host_serial(&es5510, value);
+    } else if (offset == 0x1f) {
+        es5510_host_upload_active = 1;
+        es5510_host_access_until = bus_cycle_now() + 250000;
+        es5510_core_set_halted(&es5510, 1);
     } else if (offset == 0x80) {
         if (value < 160) es5510_instruction_latch = es5510_instruction[value];
         if (value < 192 || value >= 0xea)
@@ -1389,14 +1453,18 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_cursor_active = 0;
             panel_cursor_width_pending = 0;
             panel_cursor_width_known = 0;
+            panel_cursor_segment_mask = 0;
+            panel_cursor_full_segments = 0;
             panel_noncell_parameter_pending = 0;
             panel_indicator_command_pending = 0;
         } else if (value == 'f') {
+            panel_threshold_position = -1;
             if (panel_display_dirty)
                 EPS16_PANEL_DISPLAY_PUBLISHED(panel_display,
                                               panel_display_decimal_mask,
                                               panel_cursor_start,
-                                              panel_cursor_end);
+                                              panel_cursor_end,
+                                              panel_cursor_segment_mask);
             if (live_mode && panel_display_dirty)
                 live_host_display(panel_display, panel_display_decimal_mask,
                                   panel_cursor_start, panel_cursor_end);
@@ -1419,6 +1487,8 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_cursor_active = 0;
             panel_cursor_width_pending = 0;
             panel_cursor_width_known = 0;
+            panel_cursor_segment_mask = 0;
+            panel_cursor_full_segments = 0;
             panel_noncell_parameter_pending = 0;
             panel_display_dirty = 1;
             panel_display_last_change_cycle = current_cycle;
@@ -1464,6 +1534,8 @@ static void duart_write(unsigned int address, unsigned int value) {
             panel_cursor_active = 1;
             panel_cursor_width_pending = 0;
             panel_cursor_width_known = 0;
+            panel_cursor_segment_mask = 0;
+            panel_cursor_full_segments = 0;
         } else if (value == 0x63 && panel_cursor_start >= 0) {
             /* Incremental field update: overwrite the current cursor field.
                Parameter changes use this without transmitting a new frame. */
@@ -1474,16 +1546,24 @@ static void duart_write(unsigned int address, unsigned int value) {
         } else if (value == 0x60 && panel_cursor_active && panel_last_tx == 0x62) {
             panel_cursor_width_pending = 1;
         } else if (panel_cursor_width_pending && value < 0x20) {
-            panel_cursor_end = panel_cursor_start + (int)value;
-            if (panel_cursor_end > 22) panel_cursor_end = 22;
+            /* 62 60 03 selects the physical lower segment for this field.
+               The following padded characters, not 03, define its width. */
             panel_cursor_width_pending = 0;
-            panel_cursor_width_known = 1;
+            panel_cursor_width_known = 0;
+            panel_cursor_full_segments = value == 0x03;
+            panel_cursor_segment_mask = 0;
         } else if (value == 0x72 && panel_cursor_active) {
             panel_cursor_active = 0;
             panel_cursor_width_pending = 0;
         } else if (panel_cursor_active && panel_cursor < 22) {
             char digit;
             if (panel_dotted_digit((uint8_t)value, &digit)) {
+                if (panel_cursor_full_segments)
+                    panel_cursor_segment_mask |=
+                        UINT32_C(1) << panel_cursor;
+                else
+                    panel_cursor_segment_mask &=
+                        ~(UINT32_C(1) << panel_cursor);
                 panel_display[panel_cursor] = digit;
                 panel_display_decimal_mask |= UINT32_C(1) << panel_cursor;
                 ++panel_cursor;
@@ -1492,6 +1572,12 @@ static void duart_write(unsigned int address, unsigned int value) {
                 if (!panel_cursor_width_known)
                     panel_cursor_end = (int)panel_cursor;
             } else if (value >= 0x20 && value <= 0x5f) {
+                if (panel_cursor_full_segments)
+                    panel_cursor_segment_mask |=
+                        UINT32_C(1) << panel_cursor;
+                else
+                    panel_cursor_segment_mask &=
+                        ~(UINT32_C(1) << panel_cursor);
                 panel_display_decimal_mask &= ~(UINT32_C(1) << panel_cursor);
                 panel_display[panel_cursor++] = (char)value;
                 panel_display_dirty = 1;
@@ -1499,6 +1585,36 @@ static void duart_write(unsigned int address, unsigned int value) {
                 if (!panel_cursor_width_known)
                     panel_cursor_end = (int)panel_cursor;
             }
+        } else if (!panel_cursor_active &&
+                   (value == 0x2a || value == 0x5e) &&
+                   panel_last_tx >= 1 && panel_last_tx <= 22) {
+            /* Sampling Level-Detect sends the threshold marker as the exact
+               two-byte pair <one-based cell> 2a and erases the old marker
+               with <one-based cell> 5e. Low KPC/VFD bytes have several other
+               meanings, so the address is valid only as part of these
+               observed pairs and must never move the general text cursor by
+               itself. */
+            const int position = (int)panel_last_tx - 1;
+            if (value == 0x5e) {
+                panel_display[position] = ' ';
+                panel_display_decimal_mask &= ~(UINT32_C(1) << position);
+                if (panel_threshold_position == position)
+                    panel_threshold_position = -1;
+            } else {
+                if (panel_threshold_position >= 0 &&
+                    panel_threshold_position < 22 &&
+                    panel_threshold_position != position &&
+                    panel_display[panel_threshold_position] == '*') {
+                    panel_display[panel_threshold_position] = ' ';
+                    panel_display_decimal_mask &=
+                        ~(UINT32_C(1) << panel_threshold_position);
+                }
+                panel_display[position] = '*';
+                panel_display_decimal_mask &= ~(UINT32_C(1) << position);
+                panel_threshold_position = position;
+            }
+            panel_display_dirty = 1;
+            panel_display_last_change_cycle = current_cycle;
         } else if (value >= 0x20 && value <= 0x5f && panel_cursor < 22) {
             panel_display_decimal_mask &= ~(UINT32_C(1) << panel_cursor);
             panel_display[panel_cursor++] = (char)value;
@@ -1514,7 +1630,8 @@ static void duart_write(unsigned int address, unsigned int value) {
             EPS16_PANEL_DISPLAY_PUBLISHED(panel_display,
                                           panel_display_decimal_mask,
                                           panel_cursor_start,
-                                          panel_cursor_end);
+                                          panel_cursor_end,
+                                          panel_cursor_segment_mask);
             if (live_mode)
                 live_host_display(panel_display, panel_display_decimal_mask,
                                   panel_cursor_start, panel_cursor_end);
@@ -1640,6 +1757,13 @@ static void fdc_write(unsigned int address, unsigned int value) {
         fdc_sector = (uint8_t)value;
         return;
     }
+    if (reg == 3 && fdc_remaining &&
+        (fdc_last_command & 0xe0) == 0xa0) {
+        *fdc_data++ = (uint8_t)value;
+        --fdc_remaining;
+        if (!fdc_remaining) dmac_pcl_write(0, 0); /* active-low INTRQ */
+        return;
+    }
     if (reg == 3) {
         fdc_data_register = (uint8_t)value;
         return;
@@ -1681,12 +1805,14 @@ static void fdc_write(unsigned int address, unsigned int value) {
         if (value & 0x08) dmac_pcl_write(0, 0);
         return;
     }
-    if ((value & 0xe0) == 0x80 && disk_loaded && fdc_physical_track < 80 && fdc_sector < 10) {
+    if (((value & 0xe0) == 0x80 || (value & 0xe0) == 0xa0) &&
+        disk_loaded && fdc_physical_track < 80 && fdc_sector < 10) {
         unsigned int side = floppy_side();
         unsigned int block = ((fdc_physical_track * 2 + side) * 10) + fdc_sector;
         if (load_trace_enabled && fdc_event_count < 64) {
             fprintf(stderr,
-                    "load_trace fdc_read cycle=%lld cmd=%02x track=%u phys=%u sector=%u side=%u block=%u dest=%06x\n",
+                    "load_trace fdc_%s cycle=%lld cmd=%02x track=%u phys=%u sector=%u side=%u block=%u dest=%06x\n",
+                    (value & 0x20) ? "write" : "read",
                     current_cycle, value, fdc_track, fdc_physical_track,
                     fdc_sector, side, block, dmac_get32(0, 0x14));
         }
@@ -1801,6 +1927,19 @@ static void dmac_memory_write8(uint32_t address, uint8_t value) {
     }
 }
 
+static uint8_t dmac_memory_read8(uint32_t address) {
+    address &= 0xffffff;
+    if (address < LOW_RAM_SIZE) return low_ram[address];
+    if (address >= SAMPLE_RAM_BASE &&
+        address < SAMPLE_RAM_BASE + SAMPLE_RAM_SIZE)
+        return sample_ram[address - SAMPLE_RAM_BASE];
+    if (address >= OS_RAM_BASE) return os_ram[address - OS_RAM_BASE];
+    if (address >= ROM_BASE && address < ROM_BASE + ROM_SIZE)
+        return rom[address - ROM_BASE];
+    trace_access(address, 0, 1, 0);
+    return 0;
+}
+
 static void dmac_complete(unsigned int channel) {
     dmac_registers[channel][0] |= 0xe0;
     dmac_registers[channel][0] &= (uint8_t)~0x08;
@@ -1819,13 +1958,18 @@ static void dmac_service(void) {
                 break;
             }
             uint8_t operation = dmac_registers[channel][5];
-            if (!(operation & 0x80)) break;
             uint32_t device = dmac_get32(channel, 0x14) & 0xffffff;
             if (channel == 0 && device == FDC_BASE + 7 && !fdc_remaining) break;
             uint32_t memory = dmac_get32(channel, 0x0c);
-            uint8_t value = device == FDC_BASE + 7 ? (uint8_t)fdc_read(FDC_BASE + 6)
-                                                   : (uint8_t)raw_read8(device);
-            dmac_memory_write8(memory, value);
+            if (operation & 0x80) {
+                uint8_t value = device == FDC_BASE + 7
+                    ? (uint8_t)fdc_read(FDC_BASE + 6)
+                    : (uint8_t)raw_read8(device);
+                dmac_memory_write8(memory, value);
+            } else {
+                if (device != FDC_BASE + 7) break;
+                fdc_write(FDC_BASE + 6, dmac_memory_read8(memory));
+            }
             ++dmac_transfers;
             --count;
             dmac_set16(channel, 0x0a, count);
@@ -1977,6 +2121,27 @@ static void instruction_hook(unsigned int pc) {
         kpc_legacy_cancel_load(&kpc);
         panel_drop_pending_ready();
     }
+    if (pc == 0xffba18 && getenv("EPS16_TRACE_ES5505_KEYON"))
+        fprintf(stderr,
+                "voice_volume_source cycle:%lld d0:%08x d1:%08x d2:%08x "
+                "d3:%08x d4:%08x d5:%08x d6:%08x d7:%08x "
+                "a0:%06x a1:%06x a2:%06x a3:%06x a4:%06x a5:%06x a6:%06x\n",
+                current_cycle,
+                m68k_get_reg(NULL, M68K_REG_D0),
+                m68k_get_reg(NULL, M68K_REG_D1),
+                m68k_get_reg(NULL, M68K_REG_D2),
+                m68k_get_reg(NULL, M68K_REG_D3),
+                m68k_get_reg(NULL, M68K_REG_D4),
+                m68k_get_reg(NULL, M68K_REG_D5),
+                m68k_get_reg(NULL, M68K_REG_D6),
+                m68k_get_reg(NULL, M68K_REG_D7),
+                m68k_get_reg(NULL, M68K_REG_A0) & 0xffffff,
+                m68k_get_reg(NULL, M68K_REG_A1) & 0xffffff,
+                m68k_get_reg(NULL, M68K_REG_A2) & 0xffffff,
+                m68k_get_reg(NULL, M68K_REG_A3) & 0xffffff,
+                m68k_get_reg(NULL, M68K_REG_A4) & 0xffffff,
+                m68k_get_reg(NULL, M68K_REG_A5) & 0xffffff,
+                m68k_get_reg(NULL, M68K_REG_A6) & 0xffffff);
     if (getenv("EPS16_TRACE_SAMPLE_IRQ") && pc >= 0xffe55a && pc <= 0xffe584)
         fprintf(stderr,
                 "sample_irq pc:%06x cycle:%lld imr:%02x isr:%02x panel:%zu "
@@ -2564,13 +2729,14 @@ int main(int argc, char **argv) {
                     audio_to_pcm16(buses[4][frame]),
                     audio_to_pcm16(buses[5][frame])
                 };
-                int16_t esp_outputs[2];
+                int16_t esp_outputs[2] = {0, 0};
                 if (es5510_host_upload_active &&
                     (uint64_t)current_cycle >= es5510_host_access_until) {
                     es5510_host_upload_active = 0;
                     es5510_core_set_halted(&es5510, 0);
                 }
-                es5510_core_process(&es5510, esp_inputs, esp_outputs);
+                if (!sampling_adc_is_active())
+                    es5510_core_process(&es5510, esp_inputs, esp_outputs);
                 int32_t esp_magnitude = esp_outputs[0] < 0
                     ? -(int32_t)esp_outputs[0] : (int32_t)esp_outputs[0];
                 if (esp_magnitude > es5510_return_peak)

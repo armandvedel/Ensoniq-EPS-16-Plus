@@ -19,6 +19,9 @@ physical click and could be rejected by context-dependent OS debounce paths;
 UP/DOWN clicks retain their already verified shorter timing. LEFT/RIGHT use
 the ordinary 50 ms hold because they also select complete sampling pages; the
 short cursor pulse is rejected by that original-OS debounce path.
+The VST bridge likewise spaces queued panel transitions by at least 50 ms of
+emulated CPU time. Without that interval, a short mouse click can place press
+and release in the same DAW block and the KPC firmware never observes the key.
 
 Sampling input/options updates are short KPC display frames terminated by
 `f7`, rather than ordinary frames delimited by ASCII `f` (`66`). The KPC model
@@ -45,6 +48,25 @@ between the OS field-open (`62`) and field-close (`72`) commands and transports
 the decimal point as a per-cell VFD attribute. Bytes after the 22 display cells
 remain lamp, meter, or status commands. No page names or parameter choices are
 inferred by the browser.
+
+The field-open command `62`, incremental-update command `63`, and field-close
+command `72` delimit original-OS field transport, but do not by themselves
+select a visible cursor. Hardware photos and byte-for-byte traces of the same
+`PAN MOD=LFO   * +25` page identify the additional sequence `62 60 03` as the
+lower-segment cursor selection. The constant `03` is not a width: the following
+OS-supplied padded content determines the mask. Thus the selected modulation
+source lights the lower segment in all five cells `LFO  `; RIGHT removes that
+mask and selects the three signed amount cells `+25`. A plain `62 ... 72`
+Filter MODE field produces no cursor segments. No page text or parameter value
+is inspected to make this distinction.
+
+The keypad/display schematic identifies the physical glass as Futaba
+`FIP 22AM5R`: 22 multiplexed alphanumeric cells, each with fourteen directly
+driven segments `SA..SN` and a decimal point. The VST editor now draws that
+cell topology instead of using a desktop font. The completed text, decimal
+mask and 22-bit cursor-segment mask are published together; reading transient
+parser state after its trailing `72 00` reset made valid lower segments appear
+to disappear intermittently.
 
 The VST decoder also retains the three raw 16-way lamp banks addressed by the
 paired command ranges `74..7c`. Each command consumes its following physical
@@ -117,7 +139,7 @@ The faders are analog inputs, not members of the 36-button UART matrix.
 | Control | Hardware source | Range | Encoding | Meaning | Persistence |
 |---|---|---:|---|---|---|
 | VOLUME | ES5505 parallel ADC, channel 5 | `0..1023` | 10 bits left-aligned in bits 15..6 | Master output level | Physical/runtime state; not an instrument parameter |
-| DATA ENTRY | EPS-16 Plus analog input channel 3, scanner phase `OPR & f0 = 90` | GUI `0..1023` maps to raw ADC `0..715`; calibrated OS span is `28..687`, with 28 counts of analog overtravel at both ends; Analog Test/OS reports `0..255` | Linear electrical mapping; browser transport coalesces pending events to the newest physical position; OS performs field scaling, smoothing and endpoint hysteresis | Context-dependent change of the selected OS field | Original ROM zero reference `0x0700`, `0x00c6` multiplier plus one doubling, and 0..255 scaling verified; repeated-sweep live retest pending |
+| DATA ENTRY | EPS-16 Plus analog input channel 3, scanner phase `OPR & 70 = 10` (`OP7` is the independent LINE/MIC output) | GUI `0..1023` maps to raw ADC `0..715`; calibrated OS span is `28..687`, with 28 counts of analog overtravel at both ends; Analog Test/OS reports `0..255` | Linear electrical mapping; browser transport coalesces pending events to the newest physical position; OS performs field scaling, smoothing and endpoint hysteresis | Context-dependent change of the selected OS field | Original ROM zero reference `0x0700`, `0x00c6` multiplier plus one doubling, and 0..255 scaling verified; DOWN and DATA selection of MIC retain the same scanner channels and original-OS voice setup |
 
 The emulated reset values are `1023` (`0xffc0`) for VOLUME and raw ADC `358`
 (`0x5980`) for centered DATA ENTRY. The browser's full visible travel is
@@ -228,6 +250,26 @@ byte. Sampling-meter display traffic is not allowed to manufacture additional
 ready bytes. Pending target-selection readiness is canceled when the original
 sampling overlay enters RECORD. The next deliberate ENTER press then stops
 recording and reaches `PLAY ROOT KEY`.
+
+The Level-Detect VFD traffic places the trigger-threshold star with the
+observed two-byte pair `<one-based cell> 2a` (`02 2a` at the initial
+position). When it moves the marker, the OS erases the old cell with
+`<one-based cell> 5e` before sending the new star pair. The decoder recognizes
+a cell byte only as part of those exact pairs: low KPC/VFD bytes in general are
+not character positions. Trigger threshold and the separate, supplementary
+Pre-Trigger function must not be conflated.
+
+Four RIGHT presses from Level Detect reach `INPUT LEVEL`. The original OS
+stores LINE as low-RAM `0211=01` and MIC as `0211=00`; this value drives the
+emulated CD4053 feedback switch directly. Audio routing never infers the mode
+from the rendered `INPUT LEVEL=...` text. The machine regression verifies the
+default LINE state, changes the original field to MIC with Data Entry, and
+restores LINE together with the serialized analog-filter history.
+
+The following `15 73 00 f7` and short low-byte updates are not decoded as a
+17-segment meter yet. Their exact relationship to the physical hardware still
+requires protocol proof, so the VST editor deliberately draws no meter graphic
+and does not infer one from host input amplitude.
 
 ENTER must retain the ordinary byte-by-byte display handshake used by OS
 dialogs. Disabling that handshake globally leaves the OS waiting after clearing

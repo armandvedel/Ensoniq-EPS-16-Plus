@@ -13,14 +13,17 @@ class Eps16PanelEditor final : public juce::AudioProcessorEditor,
                                private juce::Timer {
 public:
     explicit Eps16PanelEditor(Eps16PlusProcessor &);
-    ~Eps16PanelEditor() override = default;
+    ~Eps16PanelEditor() override;
     void paint(juce::Graphics &) override;
     void resized() override;
+    bool keyPressed(const juce::KeyPress &) override;
+    bool keyStateChanged(bool isKeyDown) override;
+    void focusLost(FocusChangeType) override;
 
 private:
     class VfdLabel final : public juce::Label {
     public:
-        void setCursorRange(int start, int end);
+        void setCursorSegmentMask(std::uint32_t mask);
         void setDecimalMask(std::uint32_t mask);
         void setIndicators(const std::array<std::uint16_t, 3> &on,
                            const std::array<std::uint16_t, 3> &flash,
@@ -28,8 +31,7 @@ private:
         void paint(juce::Graphics &) override;
 
     private:
-        int cursorStart{-1};
-        int cursorEnd{-1};
+        std::uint32_t cursorSegmentMask{};
         std::uint32_t decimalMask{};
         std::array<std::uint16_t, 3> indicatorOn{};
         std::array<std::uint16_t, 3> indicatorFlash{};
@@ -51,8 +53,21 @@ private:
         bool pressed{};
     };
 
+    class DiskButton final : public juce::Button {
+    public:
+        DiskButton(juce::String name, juce::String diskLabel);
+        void paintButton(juce::Graphics &, bool highlighted,
+                         bool down) override;
+
+    private:
+        juce::String label;
+    };
+
     PanelButton &addPanelButton(const juce::String &, std::uint8_t,
                                 bool known = true);
+    bool updateArrowKey(int keyCode, bool isDown);
+    void releaseArrowKeys();
+    void openSaveDiskDialog(bool hfeFormat);
     void timerCallback() override;
 
     Eps16PlusProcessor &owner;
@@ -60,6 +75,11 @@ private:
     juce::Label status;
     juce::Slider masterVolume;
     juce::Slider dataEntry;
+    DiskButton osDiskButton{"Insert OS disk", "OS"};
+    DiskButton newDiskButton{"New blank disk", "NEW"};
+    DiskButton loadDiskButton{"Load disk image", "LOAD"};
+    DiskButton saveDiskButton{"Save disk image", "SAVE"};
+    std::unique_ptr<juce::FileChooser> diskChooser;
     std::vector<std::unique_ptr<PanelButton>> buttons;
     std::array<PanelButton *, 12> pageButtons{};
     std::array<PanelButton *, 7> modeButtons{};
@@ -74,6 +94,7 @@ private:
     PanelButton *rightButton{};
     PanelButton *cancelButton{};
     PanelButton *enterButton{};
+    std::array<bool, 4> arrowKeysDown{};
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Eps16PanelEditor)
 };
 

@@ -44,6 +44,11 @@ public:
     void setResourcePath(const juce::Identifier &key, const juce::String &path);
     juce::String getResourcePath(const juce::Identifier &key) const;
     void refreshResourcePaths();
+    bool insertOsDisk();
+    bool insertDisk(const juce::File &diskFile);
+    bool createBlankDisk();
+    bool saveDisk(const juce::File &diskFile);
+    bool blankDiskMounted() const;
     static juce::File defaultResourceDirectory();
     std::uint64_t cpuCycles() const { return bridge.cpuCycles(); }
     bool machineReady() const { return machineSink.isReady(); }
@@ -51,6 +56,9 @@ public:
     juce::String machineDisplay() const { return machineSink.display(); }
     int machineCursorStart() const { return machineSink.cursorStart(); }
     int machineCursorEnd() const { return machineSink.cursorEnd(); }
+    std::uint32_t machineCursorSegmentMask() const {
+        return machineSink.cursorSegmentMask();
+    }
     std::uint32_t machineDecimalMask() const {
         return machineSink.decimalMask();
     }
@@ -67,6 +75,8 @@ public:
     static const juce::Identifier romPathKey;
     static const juce::Identifier kpcPathKey;
     static const juce::Identifier osDiskPathKey;
+    static const juce::Identifier mountedDiskPathKey;
+    static const juce::Identifier blankDiskMountedKey;
 
 private:
     static constexpr std::size_t maximumMidiEvents = 1024;

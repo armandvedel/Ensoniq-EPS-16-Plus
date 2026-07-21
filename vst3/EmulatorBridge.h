@@ -83,6 +83,7 @@ public:
     }
 
 private:
+    static constexpr std::uint64_t panelTransitionSpacingCycles = 500000;
     enum class ControlType : std::uint8_t { panel, analog };
     struct ControlEvent {
         ControlType type{};
@@ -102,6 +103,9 @@ private:
     std::atomic<std::size_t> controlWrite{};
     std::atomic<std::uint64_t> controlDrops{};
     std::atomic<std::uint64_t> publishedCycles{};
+    ControlEvent pendingControl{};
+    bool hasPendingControl{};
+    std::uint64_t nextPanelTransitionCycle{};
 };
 
 } // namespace eps16::vst3

@@ -10,6 +10,7 @@ using namespace eps16::vst3;
 
 struct CaptureSink final : EmulatorSink {
     struct Message { std::uint8_t value; std::uint64_t cycle; };
+    struct AnalogMessage { unsigned int channel; std::uint16_t value; };
     void prepare(double rate) override { preparedRate = rate; }
     void runUntil(std::uint64_t cycle) override {
         assert(cycle >= lastRunCycle);
@@ -29,6 +30,7 @@ struct CaptureSink final : EmulatorSink {
         analogChannel = channel;
         analogValue = value;
         analogCycle = cycle;
+        analogMessages.push_back({channel, value});
     }
     void samplingInput(float left, float right, std::uint64_t) override {
         inputSum += left + right;
@@ -48,6 +50,7 @@ struct CaptureSink final : EmulatorSink {
     std::size_t inputFrames{};
     std::vector<Message> midiMessages;
     std::vector<Message> panelMessages;
+    std::vector<AnalogMessage> analogMessages;
 };
 
 int main() {
@@ -57,6 +60,8 @@ int main() {
     assert(sink.preparedRate == 48000.0);
     assert(bridge.enqueuePanelTransition(0x23, true));
     assert(bridge.enqueuePanelTransition(0x23, false));
+    assert(bridge.enqueueAnalog(3, 128));
+    assert(bridge.enqueueAnalog(3, 384));
     assert(bridge.enqueueAnalog(3, 715));
 
     constexpr int frames = 48000;
@@ -79,7 +84,12 @@ int main() {
     assert(sink.panelMessages[1].value == 0x00);
     assert(sink.panelMessages[2].value == 0x23);
     assert(sink.panelMessages[3].value == 0x00);
+    assert(sink.panelMessages[2].cycle >= 500000);
     assert(sink.analogChannel == 3 && sink.analogValue == 715);
+    assert(sink.analogMessages.size() == 3);
+    assert(sink.analogMessages[0].value == 128);
+    assert(sink.analogMessages[1].value == 384);
+    assert(sink.analogMessages[2].value == 715);
     assert(sink.midiMessages.size() == 2);
     assert(sink.midiMessages[0].cycle == 0);
     assert(sink.midiMessages[1].cycle == 5000000);

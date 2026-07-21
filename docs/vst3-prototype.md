@@ -1,4 +1,4 @@
-# macOS VST3 prototype
+# macOS VST3 and Audio Unit prototype
 
 Status: milestone 1 on branch `vst3-prototype`, based on tag `topsupergold`
 and commit `8371356`.
@@ -19,9 +19,9 @@ the verified machine is mechanically extracted from `rom_probe.c`.
 
 ## Implemented in milestone 1
 
-- Apple Silicon/macOS VST3 instrument bundle with stereo sampling input,
+- Apple Silicon/macOS VST3 and Audio Unit instrument bundles with stereo sampling input,
   stereo output and MIDI input buses. It is advertised to the DAW as an
-  instrument, not an audio effect.
+  instrument, not an audio effect. Release builds target macOS 11.0 or newer.
 - No HTTP server, Web Audio, AudioQueue or CoreMIDI link in the plug-in.
 - Fixed-capacity message-thread-to-audio-thread queue for physical panel and
   analog transitions; the audio callback performs no queue allocation.
@@ -29,6 +29,13 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   to the EPS 10 MHz CPU clock using an integer remainder accumulator.
 - Stereo DAW input delivery to the emulator sampling boundary for every audio
   sample.
+- Component-derived sampling frontend from analog schematic sheet 3. The
+  original OS `INPUT LEVEL` variable selects the TL072/CD4053 LINE/MIC feedback
+  gains (`2.2874x` LINE and `57.5868x` MIC, with MIC `25.1758x` relative to
+  LINE), followed by both loaded
+  third-order fixed R/C sections. The original ES5510 sampling program then
+  applies the OS-selected digital cutoff table. No display-text inference,
+  invented noise or generic host EQ is used.
 - Stereo output delivery exclusively through the plug-in process callback.
 - Hardware-timestamped ES5505/ES5510 output at the rate selected by the
   ES5505 active-voice register. A deterministic 48-tap polyphase resampler
@@ -37,23 +44,42 @@ the verified machine is mechanically extracted from `rom_probe.c`.
 - Native original-layout panel surface. Buttons send raw KPC transitions only;
   they do not implement modes, menus or display state. Unverified RECORD,
   STOP/CONTINUE and PLAY mappings are visible but disabled.
+- While the plug-in editor has keyboard focus, the macOS cursor keys send the
+  same raw press/release transitions as the four physical EPS arrow buttons.
+  Losing focus releases every held arrow; other computer keys remain with the
+  DAW.
 - The VFD is blank until a real KPC/OS sink publishes it. No placeholder OS
   message is inserted into the display.
 - Complete and short KPC/VFD frames are published atomically to the plug-in
   editor. In particular, the original OS `71` recording frame clears the
   sampling-ready `*`; the editor no longer reads the decoder's partially
   updated character workspace.
-- ROM, KPC ROM and OS disk paths are discovered automatically from the
-  external `EPS_files` folder; file selectors are intentionally absent from
-  the compact rack GUI. No copyrighted image is in the source or bundle.
+- ROM, KPC ROM and the default OS disk are discovered automatically from the
+  external `EPS_files` folder. Four compact floppy controls provide media
+  operations without restarting the machine: `OS` reinserts the configured
+  system disk, `NEW` creates a fresh formatted 800 KiB EPS data disk, `LOAD`
+  chooses an EPS `.IMG` or HFE v1 image, and `SAVE` exports the currently
+  inserted disk as `.IMG` or standards-compatible HFE v1. `NEW` confirms in
+  English before ejecting the current in-memory disk.
+  Insertion generates the physical one-shot disk-change input for the original
+  OS. No copyrighted image is in the source or bundle.
 - Automatic discovery in the `EPS_files` folder beside the installed `.vst3`
   bundle. The package contains only an empty folder and README; user-supplied
   ROM and disk images remain external.
+- WD1772 sector writes now follow the MC68450 memory-to-device direction into
+  the instance-local logical disk. Save uses an atomic replacement file; HFE
+  export MFM-encodes all 80 tracks, two sides and ten 512-byte sectors. An
+  automated full-disk `IMG -> HFE -> IMG` round trip verifies every byte.
+  The blank-disk regression verifies the original geometry, empty directory,
+  15 reserved blocks, 1,585 free blocks, and all `DR`/`FB` signatures; the
+  original OS then reads the new disk as `NO INSTRUMENTS`.
+  Reading the generated HFE on physical replacement-drive hardware remains a
+  release acceptance check rather than an emulator-side assumption.
 - VOLUME maps to analog channel 5. DATA ENTRY uses the documented GUI
   `0..1023` to raw ADC `0..715` mapping on channel 3.
 - VST state contains a checksummed full-machine snapshot: CPU and controller
-  state, low/OS/sample RAM, ES5505, ES5510, panel, DMA, DUART and mounted-disk
-  state. A project can therefore reopen with its instruments and samples
+  state, low/OS/sample RAM, ES5505, ES5510, analog sampling-filter history,
+  panel, DMA, DUART and mounted-disk state. A project can therefore reopen with its instruments and samples
   already resident. ROM and KPC firmware bytes are deliberately excluded and
   still come from the user's external files.
 - The rack VFD includes the three permanently printed annunciator rows above
@@ -65,10 +91,24 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   state represents a stacked instrument.
 - The changing 22-character line uses compact monospaced cells anchored at the
   left edge instead of distributing the characters across the full window;
-  decimal points and the original-OS cursor remain independent attributes.
-- Sampling-level meter segments are not rendered yet. Their non-character VFD
-  traffic must be decoded from the original KPC stream; the editor must not
-  synthesize a meter from DAW input amplitude.
+  its renderer models the schematic-identified Futaba `FIP 22AM5R` topology:
+  fourteen segments plus decimal point in each of 22 cells, rather than a
+  desktop font. Decimal points and cursor segments remain independent
+  attributes. Plain `62 ... 72` field transport does not draw a cursor;
+  `62 60 03` selects the lower segment in every following OS-padded field
+  cell, including populated characters and a bipolar sign. Text, decimal mask
+  and the 22-bit segment mask are published atomically, while the OS still
+  owns their exact values.
+- The Level-Detect trigger-threshold star follows its observed two-byte
+  one-based cell/`2a` pair and replaces its previous position atomically.
+  Low KPC/VFD bytes are not treated as general character positions.
+  Trigger threshold remains distinct from the supplementary Pre-Trigger
+  function. Sampling-level meter segments are not rendered until their
+  hardware protocol has been decoded and independently verified.
+- The mono Sampling Input is automatically monitored on both main outputs
+  while the original OS is actively polling its sampling ADC, matching the
+  hardware Level-Detect and recording path. This board-level monitor is not an
+  always-on DAW dry mix; the physical VOLUME fader controls it.
 - The editor follows the low-profile rack-panel proportions: Volume and mode
   controls at the left, page matrix and Data Entry in the centre, a full-width
   22-cell VFD above the eight track keys, and sampling/sequencer controls at
@@ -91,7 +131,9 @@ snapshots and the VST state container remain byte-compatible.
 
 For every DAW block, `EmulatorBridge`:
 
-1. timestamps queued physical controls at the block boundary;
+1. dispatches queued physical controls in order, retaining a 50 ms emulated
+   key interval when a fast GUI click queues press and release before the same
+   audio block;
 2. timestamps DAW MIDI at its sample offset;
 3. submits the stereo DAW sample to the sampling input boundary;
 4. advances the machine to the exact accumulated 10 MHz cycle target;
@@ -111,8 +153,8 @@ cmake -S . -B work/vst3-build \
   -DEPS16_JUCE_DIR="$PWD/work/deps/JUCE" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build work/vst3-build --target Eps16Plus_VST3 -j 6
-cmake --build work/vst3-build --target eps16_vst3_package
+cmake --build work/vst3-build --target Eps16Plus_VST3 Eps16Plus_AU -j 6
+cmake --build work/vst3-build --target eps16_plugin_packages
 ctest --test-dir work/vst3-build --output-on-failure
 ```
 
@@ -121,13 +163,12 @@ low-level machines, two simultaneous plug-in processors, the complete
 sampling path, and VST-state round trips. ROM, KPC ROM and OS disk paths are
 passed to those tests at run time and are never embedded in the binaries.
 
-The raw bundle is written below
-`work/vst3-build/vst3/Eps16Plus_artefacts/Release/VST3/`. The package target
-copies it without Finder/resource-fork metadata, ad-hoc signs and strictly
-verifies it, then writes
-`work/vst3-build/vst3-package/EPS-16-Plus-Prototype-arm64.zip`. The archive
-contains the plug-in plus an `EPS_files` sibling folder with a README, but no
-ROM, KPC ROM or OS disk.
+The raw bundles are written below
+`work/vst3-build/vst3/Eps16Plus_artefacts/Release/`. The package targets copy
+them without Finder/resource-fork metadata, ad-hoc sign and strictly verify
+them, then write separate VST3 and AU archives in `vst3-package/` and
+`au-package/`. Each archive contains the plug-in plus an `EPS_files` sibling
+folder with a README, but no ROM, KPC ROM or OS disk.
 
 ## Remaining authentic-engine work
 

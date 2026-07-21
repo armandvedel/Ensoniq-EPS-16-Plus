@@ -51,6 +51,228 @@ static uint8_t decode_word(const uint8_t *encoded) {
     return value;
 }
 
+static void put_le16(uint8_t *target, uint16_t value) {
+    target[0] = (uint8_t)value;
+    target[1] = (uint8_t)(value >> 8);
+}
+
+int eps16_disk_create_blank(uint8_t *logical, size_t logical_size) {
+    if (!logical || logical_size != EPS16_LOGICAL_DISK_SIZE) return 0;
+    memset(logical, 0, logical_size);
+
+    /* EPS-formatted data disk: 80 cylinders, two heads, ten 512-byte
+       sectors. Block zero uses the formatter's standard repeating fill. */
+    for (size_t index = 0; index < EPS_SECTOR_SIZE; ++index)
+        logical[index] = (index & 1U) ? 0xb6 : 0x6d;
+
+    uint8_t *device = logical + EPS_SECTOR_SIZE;
+    const uint8_t descriptor[] = {
+        0x00, 0x80, 0x01, 0x00, 0x00, 0x0a, 0x00, 0x02,
+        0x00, 0x50, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x06, 0x40, 0x1e, 0x02
+    };
+    memcpy(device, descriptor, sizeof(descriptor));
+    device[30] = 0xff;
+    memcpy(device + 31, "NEWDISK", 7);
+    memcpy(device + 38, "ID", 2);
+
+    uint8_t *system = logical + 2 * EPS_SECTOR_SIZE;
+    const unsigned int free_blocks = 1600 - 15;
+    system[0] = (uint8_t)(free_blocks >> 24);
+    system[1] = (uint8_t)(free_blocks >> 16);
+    system[2] = (uint8_t)(free_blocks >> 8);
+    system[3] = (uint8_t)free_blocks;
+    memcpy(system + 28, "OS", 2);
+
+    uint8_t *directory_tail = logical + 5 * EPS_SECTOR_SIZE - 2;
+    memcpy(directory_tail, "DR", 2);
+
+    /* Blocks 0..14 are reserved. Each FAT block stores 170 big-endian
+       24-bit entries followed by its FB signature. */
+    uint8_t *fat = logical + 5 * EPS_SECTOR_SIZE;
+    for (unsigned int entry = 0; entry < 15; ++entry)
+        fat[entry * 3 + 2] = 1;
+    for (unsigned int block = 5; block < 15; ++block)
+        memcpy(logical + (block + 1) * EPS_SECTOR_SIZE - 2, "FB", 2);
+    return 1;
+}
+
+typedef struct {
+    uint8_t *data;
+    size_t size;
+    size_t capacity;
+    unsigned int previous_data_bit;
+} MfmStream;
+
+static int mfm_word(MfmStream *stream, uint16_t word) {
+    if (stream->size + 2 > stream->capacity) return 0;
+    stream->data[stream->size++] = (uint8_t)(word >> 8);
+    stream->data[stream->size++] = (uint8_t)word;
+    return 1;
+}
+
+static int mfm_byte(MfmStream *stream, uint8_t value) {
+    uint16_t word = 0;
+    for (int bit = 7; bit >= 0; --bit) {
+        const unsigned int data_bit = (value >> bit) & 1U;
+        const unsigned int clock_bit =
+            !(stream->previous_data_bit || data_bit);
+        word = (uint16_t)((word << 1) | clock_bit);
+        word = (uint16_t)((word << 1) | data_bit);
+        stream->previous_data_bit = data_bit;
+    }
+    return mfm_word(stream, word);
+}
+
+static int mfm_repeat(MfmStream *stream, uint8_t value, size_t count) {
+    while (count--)
+        if (!mfm_byte(stream, value)) return 0;
+    return 1;
+}
+
+static int mfm_sync_a1(MfmStream *stream) {
+    stream->previous_data_bit = 1;
+    return mfm_word(stream, 0x4489);
+}
+
+static int encode_track_side(const uint8_t *logical, unsigned int track,
+                             unsigned int side, uint8_t *encoded,
+                             size_t encoded_size) {
+    MfmStream stream = {encoded, 0, encoded_size, 0};
+    if (!mfm_repeat(&stream, 0x4e, 80)) return 0;
+    for (unsigned int sector = 0; sector < EPS_SECTORS; ++sector) {
+        uint8_t id[5] = {0xfe, (uint8_t)track, (uint8_t)side,
+                         (uint8_t)sector, 2};
+        uint16_t id_crc = crc16((const uint8_t *)"\xa1\xa1\xa1", 3, 0xffff);
+        id_crc = crc16(id, sizeof(id), id_crc);
+        if (!mfm_repeat(&stream, 0x00, 12) ||
+            !mfm_sync_a1(&stream) || !mfm_sync_a1(&stream) ||
+            !mfm_sync_a1(&stream)) return 0;
+        for (size_t index = 0; index < sizeof(id); ++index)
+            if (!mfm_byte(&stream, id[index])) return 0;
+        if (!mfm_byte(&stream, (uint8_t)(id_crc >> 8)) ||
+            !mfm_byte(&stream, (uint8_t)id_crc) ||
+            !mfm_repeat(&stream, 0x4e, 22) ||
+            !mfm_repeat(&stream, 0x00, 12) ||
+            !mfm_sync_a1(&stream) || !mfm_sync_a1(&stream) ||
+            !mfm_sync_a1(&stream) || !mfm_byte(&stream, 0xfb))
+            return 0;
+
+        const size_t block = ((track * EPS_SIDES + side) * EPS_SECTORS) + sector;
+        const uint8_t *sector_data = logical + block * EPS_SECTOR_SIZE;
+        uint16_t data_crc = crc16((const uint8_t *)"\xa1\xa1\xa1", 3, 0xffff);
+        const uint8_t mark = 0xfb;
+        data_crc = crc16(&mark, 1, data_crc);
+        data_crc = crc16(sector_data, EPS_SECTOR_SIZE, data_crc);
+        for (size_t index = 0; index < EPS_SECTOR_SIZE; ++index)
+            if (!mfm_byte(&stream, sector_data[index])) return 0;
+        if (!mfm_byte(&stream, (uint8_t)(data_crc >> 8)) ||
+            !mfm_byte(&stream, (uint8_t)data_crc) ||
+            !mfm_repeat(&stream, 0x4e, 40)) return 0;
+    }
+    if (stream.size > encoded_size || (encoded_size - stream.size) % 2)
+        return 0;
+    return mfm_repeat(&stream, 0x4e, (encoded_size - stream.size) / 2) &&
+           stream.size == encoded_size;
+}
+
+static uint8_t *encode_hfe(const uint8_t *logical, size_t logical_size,
+                           size_t *image_size, char *error,
+                           size_t error_size) {
+    enum {
+        HFE_HEADER_BLOCKS = 2,
+        HFE_TRACK_BLOCKS = 49,
+        HFE_TRACK_LENGTH = 25008,
+        HFE_SIDE_LENGTH = HFE_TRACK_LENGTH / 2
+    };
+    if (!logical || logical_size != EPS16_LOGICAL_DISK_SIZE) {
+        fail(error, error_size, "logical buffer must be %u bytes",
+             EPS16_LOGICAL_DISK_SIZE);
+        return NULL;
+    }
+    const size_t size = (HFE_HEADER_BLOCKS + EPS_TRACKS * HFE_TRACK_BLOCKS) * 512U;
+    uint8_t *image = malloc(size);
+    uint8_t *side_stream[EPS_SIDES] = {
+        malloc(HFE_SIDE_LENGTH), malloc(HFE_SIDE_LENGTH)
+    };
+    if (!image || !side_stream[0] || !side_stream[1]) {
+        free(side_stream[0]);
+        free(side_stream[1]);
+        free(image);
+        fail(error, error_size, "out of memory encoding HFE disk");
+        return NULL;
+    }
+    memset(image, 0xff, size);
+    memcpy(image, "HXCPICFE", 8);
+    image[8] = 0;
+    image[9] = EPS_TRACKS;
+    image[10] = EPS_SIDES;
+    image[11] = 0;
+    put_le16(image + 12, 250);
+    put_le16(image + 14, 0);
+    image[16] = 7;
+    image[17] = 1;
+    put_le16(image + 18, 1);
+
+    for (unsigned int track = 0; track < EPS_TRACKS; ++track) {
+        uint8_t *entry = image + 512 + track * 4;
+        const unsigned int start_block = HFE_HEADER_BLOCKS + track * HFE_TRACK_BLOCKS;
+        put_le16(entry, (uint16_t)start_block);
+        put_le16(entry + 2, HFE_TRACK_LENGTH);
+        if (!encode_track_side(logical, track, 0, side_stream[0],
+                               HFE_SIDE_LENGTH) ||
+            !encode_track_side(logical, track, 1, side_stream[1],
+                               HFE_SIDE_LENGTH)) {
+            free(side_stream[0]);
+            free(side_stream[1]);
+            free(image);
+            fail(error, error_size, "cannot encode HFE track %u", track);
+            return NULL;
+        }
+        uint8_t *track_data = image + (size_t)start_block * 512;
+        for (size_t block = 0; block < HFE_TRACK_BLOCKS; ++block) {
+            for (unsigned int side = 0; side < EPS_SIDES; ++side) {
+                const size_t source = block * 256;
+                const size_t count = source < HFE_SIDE_LENGTH
+                    ? (HFE_SIDE_LENGTH - source > 256
+                           ? 256 : HFE_SIDE_LENGTH - source)
+                    : 0;
+                for (size_t index = 0; index < count; ++index)
+                    track_data[block * 512 + side * 256 + index] =
+                        reverse_bits(side_stream[side][source + index]);
+            }
+        }
+    }
+    free(side_stream[0]);
+    free(side_stream[1]);
+    *image_size = size;
+    return image;
+}
+
+static int save_atomic(const char *path, const uint8_t *data, size_t size,
+                       char *error, size_t error_size) {
+    const size_t path_length = strlen(path);
+    char *temporary_path = malloc(path_length + 11);
+    if (!temporary_path) {
+        fail(error, error_size, "cannot allocate disk output path");
+        return 0;
+    }
+    memcpy(temporary_path, path, path_length);
+    memcpy(temporary_path + path_length, ".eps16.tmp", 11);
+    FILE *output = fopen(temporary_path, "wb");
+    int ok = output != NULL;
+    if (ok && fwrite(data, 1, size, output) != size) ok = 0;
+    if (output && fclose(output)) ok = 0;
+    if (!ok || rename(temporary_path, path)) {
+        remove(temporary_path);
+        free(temporary_path);
+        fail(error, error_size, "cannot save disk image: %s", path);
+        return 0;
+    }
+    free(temporary_path);
+    return 1;
+}
+
 static int decode_bytes(const uint8_t *stream, size_t stream_size, size_t offset,
                         uint8_t *output, size_t count) {
     if (offset > stream_size || count > (stream_size - offset) / 2) return 0;
@@ -225,5 +447,24 @@ int eps16_disk_load(const char *path, uint8_t *logical, size_t logical_size,
         ok = 0;
     }
     free(image);
+    return ok;
+}
+
+int eps16_disk_save(const char *path, const uint8_t *logical,
+                    size_t logical_size, Eps16DiskFormat format,
+                    char *error, size_t error_size) {
+    if (!path || !*path || !logical ||
+        logical_size != EPS16_LOGICAL_DISK_SIZE) {
+        fail(error, error_size, "invalid disk output request");
+        return 0;
+    }
+    if (format == EPS16_DISK_IMG)
+        return save_atomic(path, logical, logical_size, error, error_size);
+    size_t encoded_size = 0;
+    uint8_t *encoded = encode_hfe(logical, logical_size, &encoded_size,
+                                  error, error_size);
+    if (!encoded) return 0;
+    const int ok = save_atomic(path, encoded, encoded_size, error, error_size);
+    free(encoded);
     return ok;
 }

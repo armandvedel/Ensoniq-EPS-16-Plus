@@ -27,6 +27,8 @@ bool EmulatorBridge::prepare(double sampleRate) {
     controlWrite.store(0, std::memory_order_relaxed);
     controlDrops.store(0, std::memory_order_relaxed);
     publishedCycles.store(0, std::memory_order_relaxed);
+    hasPendingControl = false;
+    nextPanelTransitionCycle = 0;
     sink.prepare(sampleRate);
     return true;
 }
@@ -39,6 +41,8 @@ bool EmulatorBridge::resetTimeline() {
     controlWrite.store(0, std::memory_order_relaxed);
     controlDrops.store(0, std::memory_order_relaxed);
     publishedCycles.store(0, std::memory_order_relaxed);
+    hasPendingControl = false;
+    nextPanelTransitionCycle = 0;
     return true;
 }
 
@@ -72,17 +76,31 @@ bool EmulatorBridge::enqueuePanelTransition(std::uint8_t rawMatrixCode,
 
 bool EmulatorBridge::enqueueAnalog(unsigned int channel, std::uint16_t value) {
     if (channel >= 8) return false;
-    return enqueue({ControlType::analog, static_cast<std::uint8_t>(channel), value});
+    return enqueue({ControlType::analog, static_cast<std::uint8_t>(channel),
+                    value});
 }
 
 void EmulatorBridge::dispatchControls(std::uint64_t cycle) {
     ControlEvent event;
-    while (dequeue(event)) {
+    for (;;) {
+        if (hasPendingControl) {
+            event = pendingControl;
+        } else if (!dequeue(event)) {
+            return;
+        }
         if (event.type == ControlType::panel) {
+            if (cycle < nextPanelTransitionCycle) {
+                pendingControl = event;
+                hasPendingControl = true;
+                return;
+            }
+            hasPendingControl = false;
             sink.panelByte(static_cast<std::uint8_t>(event.first |
                               (event.second ? 0x80 : 0x00)), cycle);
             sink.panelByte(0x00, cycle);
+            nextPanelTransitionCycle = cycle + panelTransitionSpacingCycles;
         } else {
+            hasPendingControl = false;
             sink.analog(event.first, event.second, cycle);
         }
     }
@@ -108,6 +126,7 @@ void EmulatorBridge::process(const float *inputLeft, const float *inputRight,
     dispatchControls(clock.cycles());
     std::size_t midiIndex = 0;
     for (int sample = 0; sample < samples; ++sample) {
+        if ((sample & 63) == 0) dispatchControls(clock.cycles());
         while (midiIndex < midiEventCount &&
                midiEvents[midiIndex].sampleOffset <= sample) {
             dispatchMidi(midiEvents[midiIndex], clock.cycles());

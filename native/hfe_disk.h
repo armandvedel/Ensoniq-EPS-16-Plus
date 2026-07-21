@@ -11,7 +11,11 @@ typedef enum {
     EPS16_DISK_HFE
 } Eps16DiskFormat;
 
+int eps16_disk_create_blank(uint8_t *logical, size_t logical_size);
 int eps16_disk_load(const char *path, uint8_t *logical, size_t logical_size,
                     Eps16DiskFormat *format, char *error, size_t error_size);
+int eps16_disk_save(const char *path, const uint8_t *logical,
+                    size_t logical_size, Eps16DiskFormat format,
+                    char *error, size_t error_size);
 
 #endif

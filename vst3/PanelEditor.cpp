@@ -1,7 +1,9 @@
 #include "PanelEditor.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <utility>
 
 namespace {
 constexpr int rackWidth = 1350;
@@ -12,14 +14,173 @@ const juce::Colour displayColour{0xff55eaff};
 const juce::Colour displayDimColour{0xff17353a};
 const juce::Colour rackLabelColour{0xffe8e5df};
 const juce::Colour accentColour{0xff9d4f82};
+
+/* FIP 22AM5R alphanumeric cell, as labelled on the EPS-16 Plus keypad/display
+   schematic: fourteen directly-driven segments SA..SN plus decimal point. */
+enum VfdSegment : std::uint16_t {
+    segA  = UINT16_C(1) << 0,  segB  = UINT16_C(1) << 1,
+    segC  = UINT16_C(1) << 2,  segD  = UINT16_C(1) << 3,
+    segE  = UINT16_C(1) << 4,  segF  = UINT16_C(1) << 5,
+    segG1 = UINT16_C(1) << 6,  segG2 = UINT16_C(1) << 7,
+    segH  = UINT16_C(1) << 8,  segI  = UINT16_C(1) << 9,
+    segJ  = UINT16_C(1) << 10, segK  = UINT16_C(1) << 11,
+    segL  = UINT16_C(1) << 12, segM  = UINT16_C(1) << 13
+};
+
+constexpr std::uint16_t segG = segG1 | segG2;
+
+std::uint16_t vfdGlyph(juce::juce_wchar character) {
+    const auto c = (juce::juce_wchar)juce::CharacterFunctions::toUpperCase(
+        character);
+    switch (c) {
+        case '0': return segA | segB | segC | segD | segE | segF;
+        case '1': return segB | segC;
+        case '2': return segA | segB | segD | segE | segG;
+        case '3': return segA | segB | segC | segD | segG;
+        case '4': return segB | segC | segF | segG;
+        case '5': return segA | segC | segD | segF | segG;
+        case '6': return segA | segC | segD | segE | segF | segG;
+        case '7': return segA | segB | segC;
+        case '8': return segA | segB | segC | segD | segE | segF | segG;
+        case '9': return segA | segB | segC | segD | segF | segG;
+        case 'A': return segA | segB | segC | segE | segF | segG;
+        case 'B': return segA | segB | segC | segD | segG | segI | segL;
+        case 'C': return segA | segD | segE | segF;
+        case 'D': return segA | segB | segC | segD | segI | segL;
+        case 'E': return segA | segD | segE | segF | segG;
+        case 'F': return segA | segE | segF | segG;
+        case 'G': return segA | segC | segD | segE | segF | segG2;
+        case 'H': return segB | segC | segE | segF | segG;
+        case 'I': return segA | segD | segI | segL;
+        case 'J': return segB | segC | segD | segE;
+        case 'K': return segE | segF | segG1 | segJ | segK;
+        case 'L': return segD | segE | segF;
+        case 'M': return segB | segC | segE | segF | segH | segJ;
+        case 'N': return segB | segC | segE | segF | segH | segK;
+        case 'O': return segA | segB | segC | segD | segE | segF;
+        case 'P': return segA | segB | segE | segF | segG;
+        case 'Q': return segA | segB | segC | segD | segE | segF | segK;
+        case 'R': return segA | segB | segE | segF | segG | segK;
+        case 'S': return segA | segC | segD | segF | segG;
+        case 'T': return segA | segI | segL;
+        case 'U': return segB | segC | segD | segE | segF;
+        case 'V': return segE | segF | segJ | segM;
+        case 'W': return segB | segC | segE | segF | segK | segM;
+        case 'X': return segH | segJ | segK | segM;
+        case 'Y': return segH | segJ | segL;
+        case 'Z': return segA | segD | segJ | segM;
+        case '-': return segG;
+        case '_': return segD;
+        case '=': return segG | segD;
+        case '+': return segG | segI | segL;
+        case '/': return segJ | segM;
+        case '\\': return segH | segK;
+        case '*': return segG | segH | segI | segJ | segK | segL | segM;
+        case '[': return segA | segD | segE | segF;
+        case ']': return segA | segB | segC | segD;
+        case '(': return segJ | segK;
+        case ')': return segH | segM;
+        case '<': return segJ | segK;
+        case '>': return segH | segM;
+        case '\'': return segJ;
+        case '"': return segF | segB;
+        case '?': return segA | segB | segG2 | segL;
+        default: return 0;
+    }
 }
 
-void Eps16PanelEditor::VfdLabel::setCursorRange(int start, int end) {
-    start = juce::jlimit(-1, 22, start);
-    end = juce::jlimit(-1, 22, end);
-    if (cursorStart == start && cursorEnd == end) return;
-    cursorStart = start;
-    cursorEnd = end;
+juce::Path vfdSegmentPath(juce::Line<float> line, float width) {
+    const auto vector = line.getEnd() - line.getStart();
+    const auto length = vector.getDistanceFromOrigin();
+    if (length <= 0.0f) return {};
+    const auto along = vector / length;
+    const juce::Point<float> across{-along.y, along.x};
+    const auto halfWidth = width * 0.5f;
+    const auto bevel = juce::jmin(width * 0.55f, length * 0.16f);
+    const auto start = line.getStart();
+    const auto end = line.getEnd();
+    juce::Path path;
+    path.startNewSubPath(start - across * halfWidth);
+    path.lineTo(start - along * bevel);
+    path.lineTo(start + across * halfWidth);
+    path.lineTo(end + across * halfWidth);
+    path.lineTo(end + along * bevel);
+    path.lineTo(end - across * halfWidth);
+    path.closeSubPath();
+    return path;
+}
+
+void drawVfdElectrode(juce::Graphics &graphics, juce::Line<float> line,
+                      float width, bool lit, juce::Colour colour) {
+    const auto segment = vfdSegmentPath(line, width);
+    if (lit) {
+        graphics.setColour(colour.withAlpha(0.14f));
+        graphics.strokePath(segment,
+                            juce::PathStrokeType(width * 1.8f));
+        graphics.setColour(colour);
+    } else {
+        graphics.setColour(displayDimColour.withAlpha(0.22f));
+    }
+    graphics.fillPath(segment);
+}
+
+void drawVfdCell(juce::Graphics &graphics, juce::Rectangle<float> cell,
+                 std::uint16_t active, bool decimalPoint, bool cursor,
+                 juce::Colour colour) {
+    /* The FIP 22AM5R glass has a separate cursor electrode below every
+       alphanumeric cell. The hardware close-up shows a real gap between it
+       and the character's D segment; it is not the D segment itself. */
+    cell = cell.reduced(0.45f, 0.35f);
+    const float cursorWidth = juce::jmax(1.15f, cell.getWidth() * 0.105f);
+    const float cursorGap = juce::jmax(1.35f, cell.getHeight() * 0.075f);
+    const float cursorY = cell.getBottom() - cursorWidth * 0.5f;
+    const auto glyph = cell.withBottom(cursorY - cursorGap);
+    const float left = glyph.getX() + glyph.getWidth() * 0.12f;
+    const float centre = glyph.getX() + glyph.getWidth() * 0.43f;
+    const float right = glyph.getX() + glyph.getWidth() * 0.73f;
+    const float top = glyph.getY() + 0.8f;
+    const float middle = glyph.getCentreY();
+    const float bottom = glyph.getBottom() - 0.6f;
+    const float gap = juce::jmax(0.48f, glyph.getWidth() * 0.045f);
+    const float tip = juce::jmax(0.65f, glyph.getWidth() * 0.075f);
+    const std::array<juce::Line<float>, 14> lines{{
+        {{left + tip, top}, {right - tip, top}},
+        {{right, top + tip}, {right, middle - tip}},
+        {{right, middle + tip}, {right, bottom - tip}},
+        {{left + tip, bottom}, {right - tip, bottom}},
+        {{left, middle + tip}, {left, bottom - tip}},
+        {{left, top + tip}, {left, middle - tip}},
+        {{left + tip, middle}, {centre - gap, middle}},
+        {{centre + gap, middle}, {right - tip, middle}},
+        {{left + tip, top + tip}, {centre - gap, middle - gap}},
+        {{centre, top + tip}, {centre, middle - gap}},
+        {{right - tip, top + tip}, {centre + gap, middle - gap}},
+        {{centre + gap, middle + gap}, {right - tip, bottom - tip}},
+        {{centre, middle + gap}, {centre, bottom - tip}},
+        {{centre - gap, middle + gap}, {left + tip, bottom - tip}}
+    }};
+    const float coreWidth = juce::jmax(0.9f, cell.getWidth() * 0.082f);
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        const auto bit = (std::uint16_t)(UINT16_C(1) << index);
+        drawVfdElectrode(graphics, lines[index], coreWidth,
+                         (active & bit) != 0, colour);
+    }
+    const float dotSize = juce::jmax(1.35f, cell.getWidth() * 0.115f);
+    graphics.setColour(decimalPoint ? colour
+                                    : displayDimColour.withAlpha(0.22f));
+    graphics.fillEllipse(glyph.getX() + glyph.getWidth() * 0.82f,
+                         bottom - dotSize * 0.4f, dotSize, dotSize);
+
+    const juce::Line<float> cursorLine{
+        {left + tip, cursorY}, {right - tip, cursorY}};
+    drawVfdElectrode(graphics, cursorLine, cursorWidth, cursor, colour);
+}
+}
+
+void Eps16PanelEditor::VfdLabel::setCursorSegmentMask(std::uint32_t mask) {
+    mask &= 0x3fffffU;
+    if (cursorSegmentMask == mask) return;
+    cursorSegmentMask = mask;
     repaint();
 }
 
@@ -108,31 +269,22 @@ void Eps16PanelEditor::VfdLabel::paint(juce::Graphics &graphics) {
     const auto textArea = juce::Rectangle<float>(
         bounds.getX(), bounds.getY() + indicatorHeight + 3.0f,
         bounds.getWidth(), bounds.getHeight() - indicatorHeight - 3.0f);
-    const float cellWidth = font.getHeight() * 0.66f;
-    const float baselineY = textArea.getCentreY() + font.getHeight() * 0.34f;
-
-    graphics.setColour(findColour(juce::Label::textColourId).withAlpha(0.16f));
-    graphics.setFont(font);
-    graphics.drawText(getText().paddedRight(' ', 22).substring(0, 22),
-                      textArea.translated(0.0f, 1.0f),
-                      juce::Justification::centredLeft, false);
-    graphics.setColour(findColour(juce::Label::textColourId));
-    graphics.setFont(font);
+    const float cellHeight = juce::jmin(textArea.getHeight() - 1.0f,
+                                        font.getHeight() * 1.32f);
+    const float cellWidth = font.getHeight() * 0.82f;
+    const float cellTop = textArea.getCentreY() - cellHeight * 0.5f;
     const auto text = getText().paddedRight(' ', 22).substring(0, 22);
     for (int index = 0; index < 22; ++index) {
+        const auto segments = vfdGlyph(text[index]);
+        const bool cursor =
+            (cursorSegmentMask & (UINT32_C(1) << index)) != 0;
         const auto cell = juce::Rectangle<float>(
-            textArea.getX() + cellWidth * (float)index, textArea.getY(),
-            cellWidth, textArea.getHeight());
-        graphics.drawText(text.substring(index, index + 1), cell,
-                          juce::Justification::centred, false);
-        if (!(decimalMask & (UINT32_C(1) << index))) continue;
-        const float dotX = cell.getRight() - 3.5f;
-        graphics.fillEllipse(dotX, baselineY - 2.0f, 3.0f, 3.0f);
-    }
-    if (cursorStart >= 0 && cursorEnd > cursorStart) {
-        const float cursorLeft = textArea.getX() + cellWidth * (float)cursorStart;
-        const float cursorWidth = cellWidth * (float)(cursorEnd - cursorStart);
-        graphics.fillRect(cursorLeft, baselineY + 2.0f, cursorWidth, 2.0f);
+            textArea.getX() + cellWidth * (float)index, cellTop,
+            cellWidth, cellHeight);
+        drawVfdCell(graphics, cell, segments,
+                    (decimalMask & (UINT32_C(1) << index)) != 0,
+                    cursor,
+                    findColour(juce::Label::textColourId));
     }
 }
 
@@ -146,11 +298,13 @@ Eps16PanelEditor::PanelButton::PanelButton(Eps16PlusProcessor &processorToUse,
     setColour(buttonColourId, buttonColour);
     setColour(buttonOnColourId, buttonColour.brighter(0.18f));
     setColour(textColourOffId, rackLabelColour);
+    setWantsKeyboardFocus(false);
     setEnabled(mappingKnown);
     if (!mappingKnown) setTooltip("Wire mapping is not verified yet");
 }
 
 void Eps16PanelEditor::PanelButton::mouseDown(const juce::MouseEvent &event) {
+    if (auto *parent = getParentComponent()) parent->grabKeyboardFocus();
     if (isEnabled() && !pressed) {
         pressed = processor.enqueuePanelTransition(code, true);
     }
@@ -174,26 +328,152 @@ void Eps16PanelEditor::PanelButton::mouseExit(const juce::MouseEvent &event) {
     TextButton::mouseExit(event);
 }
 
+Eps16PanelEditor::DiskButton::DiskButton(juce::String name,
+                                         juce::String diskLabel)
+    : Button(std::move(name)), label(std::move(diskLabel)) {
+    setWantsKeyboardFocus(false);
+}
+
+void Eps16PanelEditor::DiskButton::paintButton(juce::Graphics &graphics,
+                                               bool highlighted, bool down) {
+    auto area = getLocalBounds().toFloat().reduced(1.0f);
+    auto body = buttonColour;
+    if (highlighted) body = body.brighter(0.10f);
+    if (down) body = body.brighter(0.18f);
+    if (!isEnabled()) body = body.withMultipliedAlpha(0.42f);
+    graphics.setColour(body);
+    graphics.fillRoundedRectangle(area, 2.5f);
+    graphics.setColour(rackLabelColour.withMultipliedAlpha(
+        isEnabled() ? 0.90f : 0.35f));
+    graphics.drawRoundedRectangle(area, 2.5f, 1.0f);
+
+    const auto shutter = juce::Rectangle<float>(
+        area.getX() + area.getWidth() * 0.22f,
+        area.getY() + area.getHeight() * 0.08f,
+        area.getWidth() * 0.56f, area.getHeight() * 0.27f);
+    graphics.setColour(juce::Colour(0xff777b7a).withMultipliedAlpha(
+        isEnabled() ? 1.0f : 0.4f));
+    graphics.fillRect(shutter);
+    graphics.setColour(juce::Colour(0xff1b1c1b));
+    graphics.fillRect(shutter.getRight() - shutter.getWidth() * 0.22f,
+                      shutter.getY(), shutter.getWidth() * 0.12f,
+                      shutter.getHeight());
+
+    const auto labelArea = juce::Rectangle<float>(
+        area.getX() + area.getWidth() * 0.11f,
+        area.getY() + area.getHeight() * 0.50f,
+        area.getWidth() * 0.78f, area.getHeight() * 0.34f);
+    graphics.setColour(juce::Colour(0xffdedbd1).withMultipliedAlpha(
+        isEnabled() ? 1.0f : 0.4f));
+    graphics.fillRoundedRectangle(labelArea, 1.0f);
+    graphics.setColour(juce::Colour(0xff252625).withMultipliedAlpha(
+        isEnabled() ? 1.0f : 0.45f));
+    graphics.setFont(juce::Font(juce::FontOptions(
+        "Helvetica Neue", juce::jmax(5.5f, labelArea.getHeight() * 0.54f),
+        juce::Font::bold)));
+    graphics.drawText(label, labelArea, juce::Justification::centred, false);
+}
+
 Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     : AudioProcessorEditor(processorToUse), owner(processorToUse) {
     setSize(rackWidth, rackHeight);
     setResizable(true, true);
     setResizeLimits(1080, 228, 1620, 342);
+    setWantsKeyboardFocus(true);
+    setMouseClickGrabsKeyboardFocus(true);
     if (auto *constrainer = getConstrainer())
         constrainer->setFixedAspectRatio((double)rackWidth / rackHeight);
 
     vfd.setText(juce::String::repeatedString(" ", 22), juce::dontSendNotification);
     vfd.setJustificationType(juce::Justification::centredLeft);
+    vfd.setComponentID("vfd-display");
     vfd.setFont(juce::Font(juce::FontOptions("Menlo", 20.0f,
                                              juce::Font::plain)));
     vfd.setColour(juce::Label::backgroundColourId, juce::Colours::black);
     vfd.setColour(juce::Label::textColourId, displayColour);
     addAndMakeVisible(vfd);
 
-    status.setText("VST3 adapter active - waiting for authentic emulator boot",
+    status.setText("Plug-in adapter active - waiting for authentic emulator boot",
                    juce::dontSendNotification);
     status.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
     addChildComponent(status);
+
+    osDiskButton.setComponentID("os-disk-button");
+    osDiskButton.setEnabled(false);
+    osDiskButton.onClick = [this] { owner.insertOsDisk(); };
+    addAndMakeVisible(osDiskButton);
+
+    newDiskButton.setComponentID("new-disk-button");
+    newDiskButton.setEnabled(false);
+    newDiskButton.onClick = [this] {
+        auto safeEditor = juce::Component::SafePointer<Eps16PanelEditor>(this);
+        juce::NativeMessageBox::showOkCancelBox(
+            juce::MessageBoxIconType::QuestionIcon,
+            "New blank EPS disk",
+            "Eject the current disk and insert a new blank EPS disk?\n\n"
+            "Unsaved disk changes will be lost.",
+            this,
+            juce::ModalCallbackFunction::create([safeEditor](int result) {
+                if (result != 1) return;
+                if (auto *editor = safeEditor.getComponent())
+                    editor->owner.createBlankDisk();
+            }));
+    };
+    addAndMakeVisible(newDiskButton);
+
+    loadDiskButton.setComponentID("load-disk-button");
+    loadDiskButton.setEnabled(false);
+    loadDiskButton.onClick = [this] {
+        juce::File initialFile(owner.getResourcePath(
+            Eps16PlusProcessor::mountedDiskPathKey));
+        if (!initialFile.existsAsFile())
+            initialFile = juce::File(owner.getResourcePath(
+                Eps16PlusProcessor::osDiskPathKey));
+        const auto initialDirectory = initialFile.existsAsFile()
+            ? initialFile.getParentDirectory()
+            : Eps16PlusProcessor::defaultResourceDirectory();
+        diskChooser = std::make_unique<juce::FileChooser>(
+            "Insert EPS disk image (.IMG or .HFE)", initialDirectory, "*");
+        auto safeEditor = juce::Component::SafePointer<Eps16PanelEditor>(this);
+        diskChooser->launchAsync(
+            juce::FileBrowserComponent::openMode |
+                juce::FileBrowserComponent::canSelectFiles,
+            [safeEditor](const juce::FileChooser &chooser) {
+                if (auto *editor = safeEditor.getComponent()) {
+                    const auto file = chooser.getResult();
+                    if (!file.existsAsFile()) return;
+                    const auto extension = file.getFileExtension().toLowerCase();
+                    if (extension == ".img" || extension == ".hfe") {
+                        editor->owner.insertDisk(file);
+                    } else {
+                        juce::NativeMessageBox::showMessageBoxAsync(
+                            juce::MessageBoxIconType::WarningIcon,
+                            "Unsupported disk image",
+                            "Please choose an EPS .IMG or .HFE disk image.",
+                            editor);
+                    }
+                }
+            });
+    };
+    addAndMakeVisible(loadDiskButton);
+
+    saveDiskButton.setComponentID("save-disk-button");
+    saveDiskButton.setEnabled(false);
+    saveDiskButton.onClick = [this] {
+        auto safeEditor = juce::Component::SafePointer<Eps16PanelEditor>(this);
+        juce::PopupMenu formats;
+        formats.addItem(1, "Save as IMG...");
+        formats.addItem(2, "Save as HFE...");
+        formats.showMenuAsync(
+            juce::PopupMenu::Options().withTargetComponent(&saveDiskButton),
+            [safeEditor](int choice) {
+                if (auto *editor = safeEditor.getComponent()) {
+                    if (choice == 1) editor->openSaveDiskDialog(false);
+                    if (choice == 2) editor->openSaveDiskDialog(true);
+                }
+            });
+    };
+    addAndMakeVisible(saveDiskButton);
 
     const std::array<std::pair<const char *, std::uint8_t>, 12> pages{{
         {"1 / ENV 1", 0x0d}, {"2 / ENV 2", 0x12}, {"3 / ENV 3", 0x13},
@@ -233,8 +513,14 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
 
     auto configureFader = [this](juce::Slider &slider, const juce::String &name) {
         slider.setName(name);
+        slider.setComponentID(name == "DATA ENTRY" ? "data-entry-slider"
+                                                    : "volume-slider");
         slider.setSliderStyle(juce::Slider::LinearVertical);
         slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        /* Keep ordinary Slider mouse drag/wheel handling. A click must not
+           steal the editor focus because the physical arrow keys belong to
+           the panel rather than to the JUCE slider. */
+        slider.setMouseClickGrabsKeyboardFocus(false);
         slider.setRange(0, 1023, 1);
         addAndMakeVisible(slider);
     };
@@ -260,6 +546,42 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     startTimerHz(4);
 }
 
+Eps16PanelEditor::~Eps16PanelEditor() {
+    releaseArrowKeys();
+}
+
+void Eps16PanelEditor::openSaveDiskDialog(bool hfeFormat) {
+    juce::File mounted(owner.getResourcePath(
+        Eps16PlusProcessor::mountedDiskPathKey));
+    const bool isBlankDisk = owner.blankDiskMounted();
+    if (!isBlankDisk && !mounted.existsAsFile())
+        mounted = juce::File(owner.getResourcePath(
+            Eps16PlusProcessor::osDiskPathKey));
+    const juce::String extension = hfeFormat ? ".hfe" : ".img";
+    auto suggested = !isBlankDisk && mounted.existsAsFile()
+        ? mounted.getSiblingFile(mounted.getFileNameWithoutExtension() +
+                                 "-saved" + extension)
+        : Eps16PlusProcessor::defaultResourceDirectory()
+              .getChildFile(isBlankDisk ? "NEWDISK" + extension
+                                        : "EPS-disk-saved" + extension);
+    diskChooser = std::make_unique<juce::FileChooser>(
+        hfeFormat ? "Save EPS disk as HFE" : "Save EPS disk as IMG",
+        suggested, "*");
+    auto safeEditor = juce::Component::SafePointer<Eps16PanelEditor>(this);
+    diskChooser->launchAsync(
+        juce::FileBrowserComponent::saveMode |
+            juce::FileBrowserComponent::canSelectFiles |
+            juce::FileBrowserComponent::warnAboutOverwriting,
+        [safeEditor, hfeFormat](const juce::FileChooser &chooser) {
+            if (auto *editor = safeEditor.getComponent()) {
+                auto file = chooser.getResult();
+                if (file.getFullPathName().isEmpty()) return;
+                file = file.withFileExtension(hfeFormat ? ".hfe" : ".img");
+                editor->owner.saveDisk(file);
+            }
+        });
+}
+
 Eps16PanelEditor::PanelButton &Eps16PanelEditor::addPanelButton(
     const juce::String &label, std::uint8_t code, bool known) {
     auto button = std::make_unique<PanelButton>(owner, label, code, known);
@@ -269,10 +591,78 @@ Eps16PanelEditor::PanelButton &Eps16PanelEditor::addPanelButton(
     return reference;
 }
 
+bool Eps16PanelEditor::updateArrowKey(int keyCode, bool isDown) {
+    static const std::array<int, 4> keyCodes{
+        juce::KeyPress::upKey, juce::KeyPress::downKey,
+        juce::KeyPress::leftKey, juce::KeyPress::rightKey
+    };
+    static constexpr std::array<std::uint8_t, 4> panelCodes{
+        0x0a, 0x0b, 0x10, 0x11
+    };
+    for (std::size_t index = 0; index < keyCodes.size(); ++index) {
+        if (keyCode != keyCodes[index]) continue;
+        if (arrowKeysDown[index] == isDown) return true;
+        if (isDown) {
+            arrowKeysDown[index] =
+                owner.enqueuePanelTransition(panelCodes[index], true);
+        } else {
+            owner.enqueuePanelTransition(panelCodes[index], false);
+            arrowKeysDown[index] = false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool Eps16PanelEditor::keyPressed(const juce::KeyPress &key) {
+    return updateArrowKey(key.getKeyCode(), true);
+}
+
+bool Eps16PanelEditor::keyStateChanged(bool) {
+    const bool hadArrowDown = std::any_of(arrowKeysDown.begin(),
+                                          arrowKeysDown.end(),
+                                          [](bool down) { return down; });
+    static const std::array<int, 4> keyCodes{
+        juce::KeyPress::upKey, juce::KeyPress::downKey,
+        juce::KeyPress::leftKey, juce::KeyPress::rightKey
+    };
+    for (const auto keyCode : keyCodes)
+        updateArrowKey(keyCode, juce::KeyPress::isKeyCurrentlyDown(keyCode));
+    const bool hasArrowDown = std::any_of(arrowKeysDown.begin(),
+                                          arrowKeysDown.end(),
+                                          [](bool down) { return down; });
+    return hadArrowDown || hasArrowDown;
+}
+
+void Eps16PanelEditor::releaseArrowKeys() {
+    static const std::array<int, 4> keyCodes{
+        juce::KeyPress::upKey, juce::KeyPress::downKey,
+        juce::KeyPress::leftKey, juce::KeyPress::rightKey
+    };
+    for (const auto keyCode : keyCodes) updateArrowKey(keyCode, false);
+}
+
+void Eps16PanelEditor::focusLost(FocusChangeType cause) {
+    releaseArrowKeys();
+    AudioProcessorEditor::focusLost(cause);
+}
+
 void Eps16PanelEditor::timerCallback() {
     owner.refreshResourcePaths();
+    const juce::File osDisk(owner.getResourcePath(
+        Eps16PlusProcessor::osDiskPathKey));
+    osDiskButton.setEnabled(owner.machineReady() && osDisk.existsAsFile());
+    osDiskButton.setTooltip(osDisk.existsAsFile()
+        ? "Insert OS disk: " + osDisk.getFileName()
+        : "OS disk not found in EPS_files");
+    newDiskButton.setEnabled(owner.machineReady());
+    newDiskButton.setTooltip("Insert a new blank formatted EPS disk");
+    loadDiskButton.setEnabled(owner.machineReady());
+    loadDiskButton.setTooltip("Insert an EPS .IMG or .HFE disk image");
+    saveDiskButton.setEnabled(owner.machineReady());
+    saveDiskButton.setTooltip("Save the inserted disk as .IMG or .HFE");
     vfd.setText(owner.machineDisplay(), juce::dontSendNotification);
-    vfd.setCursorRange(owner.machineCursorStart(), owner.machineCursorEnd());
+    vfd.setCursorSegmentMask(owner.machineCursorSegmentMask());
     vfd.setDecimalMask(owner.machineDecimalMask());
     std::array<std::uint16_t, 3> indicatorOn{};
     std::array<std::uint16_t, 3> indicatorFlash{};
@@ -528,5 +918,9 @@ void Eps16PanelEditor::resized() {
     downButton->setBounds(rackRect(589, 119, 39, 18));
     cancelButton->setBounds(rackRect(552, 183, 42, 22));
     enterButton->setBounds(rackRect(624, 183, 42, 22));
+    osDiskButton.setBounds(rackRect(1167, 20, 32, 36));
+    newDiskButton.setBounds(rackRect(1203, 20, 32, 36));
+    loadDiskButton.setBounds(rackRect(1239, 20, 32, 36));
+    saveDiskButton.setBounds(rackRect(1275, 20, 32, 36));
 
 }

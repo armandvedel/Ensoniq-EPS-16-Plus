@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(eps16_emulator_foundation VERSION 0.2.14 LANGUAGES C CXX)
+if(CMAKE_HOST_APPLE AND
+   (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR
+    CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL ""))
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING
+      "Minimum macOS version" FORCE)
+endif()
+project(eps16_emulator_foundation VERSION 0.2.16 LANGUAGES C CXX)
 
 option(EPS16_BUILD_VST3 "Build the separated macOS VST3 prototype" OFF)
 
@@ -60,6 +66,7 @@ add_executable(eps16_rom_probe
   native/m68hc11_core.c
   native/es5505_core.c
   native/es5510_core.c
+  native/sampling_input_circuit.c
   native/hfe_disk.c
   native/live_host.c
 )
@@ -86,8 +93,23 @@ add_executable(eps16_es5510_core_test
 )
 target_include_directories(eps16_es5510_core_test PRIVATE native)
 
+add_executable(eps16_sampling_input_circuit_test
+  native/sampling_input_circuit.c
+  native/sampling_input_circuit_test.c
+)
+target_include_directories(eps16_sampling_input_circuit_test PRIVATE native)
+if(NOT MSVC)
+  target_link_libraries(eps16_sampling_input_circuit_test PRIVATE m)
+endif()
+
 add_executable(eps16_disk_input_test native/hfe_disk.c native/hfe_disk_test.c)
 target_include_directories(eps16_disk_input_test PRIVATE native)
+
+add_executable(eps16_hfe_roundtrip_test
+  native/hfe_disk.c
+  native/hfe_disk_roundtrip_test.c
+)
+target_include_directories(eps16_hfe_roundtrip_test PRIVATE native)
 
 add_executable(eps16_m68hc11_core_test
   native/m68hc11_core.c
@@ -99,6 +121,8 @@ enable_testing()
 add_test(NAME cpu_smoke COMMAND eps16_cpu_smoke)
 add_test(NAME es5505_core COMMAND eps16_es5505_core_test)
 add_test(NAME es5510_core COMMAND eps16_es5510_core_test)
+add_test(NAME sampling_input_circuit COMMAND eps16_sampling_input_circuit_test)
+add_test(NAME hfe_roundtrip COMMAND eps16_hfe_roundtrip_test)
 add_test(NAME m68hc11_core COMMAND eps16_m68hc11_core_test)
 
 if(EPS16_BUILD_VST3)

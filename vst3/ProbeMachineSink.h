@@ -22,6 +22,9 @@ public:
     void endBlock() override;
     void configure(std::string romPath, std::string kpcPath,
                    std::string osDiskPath);
+    bool insertDisk(const std::string &path, const std::string &label);
+    bool createBlankDisk();
+    bool saveDisk(const std::string &path, bool hfeFormat);
 
     void prepare(double dawSampleRate) override;
     void runUntil(std::uint64_t absoluteCpuCycle) override;
@@ -44,6 +47,9 @@ public:
     }
     [[nodiscard]] int cursorEnd() const {
         return displayCursorEnd.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] std::uint32_t cursorSegmentMask() const {
+        return displayCursorSegmentMask.load(std::memory_order_relaxed);
     }
     [[nodiscard]] std::uint32_t decimalMask() const {
         return displayDecimalMask.load(std::memory_order_relaxed);
@@ -72,10 +78,12 @@ private:
     std::array<std::atomic<char>, 23> displayCharacters{};
     std::atomic<int> displayCursorStart{-1};
     std::atomic<int> displayCursorEnd{-1};
+    std::atomic<std::uint32_t> displayCursorSegmentMask{};
     std::atomic<std::uint32_t> displayDecimalMask{};
     std::atomic<std::size_t> displayIllegalInstructions{};
     std::array<std::atomic<std::uint16_t>, 3> displayIndicatorOn{};
     std::array<std::atomic<std::uint16_t>, 3> displayIndicatorFlash{};
+    float samplingMonitorSample{};
     std::atomic<bool> ready{};
     Eps16ProbeMachine *machine{};
     bool blockActive{};

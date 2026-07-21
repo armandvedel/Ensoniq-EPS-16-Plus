@@ -1,6 +1,7 @@
 #include "ProbeMachineSink.h"
 #include "ProbeMachine.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace eps16::vst3 {
@@ -49,6 +50,57 @@ void ProbeMachineSink::configure(std::string romPath, std::string kpcPath,
     disk = std::move(osDiskPath);
 }
 
+bool ProbeMachineSink::insertDisk(const std::string &path,
+                                  const std::string &label) {
+    if (!isReady() || path.empty()) return false;
+    MachineAccess access(machine);
+    if (!access) return false;
+    char error[256]{};
+    if (!eps16_probe_machine_insert_disk(path.c_str(), error, sizeof(error))) {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = error[0] ? error : "disk insertion failed";
+        return false;
+    }
+    {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = label + " inserted";
+    }
+    return true;
+}
+
+bool ProbeMachineSink::createBlankDisk() {
+    if (!isReady()) return false;
+    MachineAccess access(machine);
+    if (!access) return false;
+    char error[256]{};
+    if (!eps16_probe_machine_create_blank_disk(error, sizeof(error))) {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = error[0] ? error : "blank disk creation failed";
+        return false;
+    }
+    const std::lock_guard<std::mutex> lock(statusMutex);
+    statusText = "New blank EPS disk inserted";
+    return true;
+}
+
+bool ProbeMachineSink::saveDisk(const std::string &path, bool hfeFormat) {
+    if (!isReady() || path.empty()) return false;
+    MachineAccess access(machine);
+    if (!access) return false;
+    char error[256]{};
+    if (!eps16_probe_machine_save_disk(path.c_str(), hfeFormat ? 1 : 0,
+                                       error, sizeof(error))) {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = error[0] ? error : "disk save failed";
+        return false;
+    }
+    {
+        const std::lock_guard<std::mutex> lock(statusMutex);
+        statusText = hfeFormat ? "disk saved as HFE" : "disk saved as IMG";
+    }
+    return true;
+}
+
 void ProbeMachineSink::prepare(double dawSampleRate) {
     if (!resampler.prepare(dawSampleRate)) {
         const std::lock_guard<std::mutex> lock(statusMutex);
@@ -66,6 +118,7 @@ void ProbeMachineSink::prepare(double dawSampleRate) {
     char error[256]{};
     if (eps16_probe_machine_initialize(rom.c_str(), kpc.c_str(), disk.c_str(),
                                        error, sizeof(error))) {
+        eps16_probe_machine_sampling_input_rate(dawSampleRate);
         cycleBase = eps16_probe_machine_cycles();
         discardQueuedAudio();
         {
@@ -119,7 +172,9 @@ void ProbeMachineSink::analog(unsigned int channel, std::uint16_t value,
 }
 
 void ProbeMachineSink::samplingInput(float left, float right, std::uint64_t) {
-    if (isReady()) eps16_probe_machine_sampling_input(left, right);
+    const float mono = std::clamp(0.5f * (left + right), -1.0f, 1.0f);
+    samplingMonitorSample = isReady()
+        ? eps16_probe_machine_sampling_input(mono, mono) : mono;
 }
 
 void ProbeMachineSink::stereoOutput(float &left, float &right,
@@ -130,6 +185,17 @@ void ProbeMachineSink::stereoOutput(float &left, float &right,
         return;
     }
     resampler.output(cycle, left, right);
+    /* The EPS-16 Plus routes its mono input directly to both stereo outputs
+       in Level-Detect/recording mode. Host Serial Control 0x48 identifies
+       ES5510 port 1 as the DAC output, so this board monitor is outside the
+       ESP program. Gate it from actual OS ADC polling, never GUI text. */
+    if (eps16_probe_machine_sampling_monitor_active()) {
+        const float gain =
+            (float)eps16_probe_machine_master_volume() / 1023.0f;
+        const float monitor = samplingMonitorSample * gain;
+        left = std::clamp(left + monitor, -1.0f, 1.0f);
+        right = std::clamp(right + monitor, -1.0f, 1.0f);
+    }
 }
 
 void ProbeMachineSink::publishDisplay() {
@@ -138,11 +204,15 @@ void ProbeMachineSink::publishDisplay() {
     int cursorEnd = -1;
     eps16_probe_machine_display(text);
     const auto decimalMask = eps16_probe_machine_decimal_mask();
+    const auto cursorSegmentMask =
+        eps16_probe_machine_cursor_segment_mask();
     eps16_probe_machine_cursor(&cursorStart, &cursorEnd);
     for (std::size_t index = 0; index < 23; ++index)
         displayCharacters[index].store(text[index], std::memory_order_relaxed);
     displayCursorStart.store(cursorStart, std::memory_order_relaxed);
     displayCursorEnd.store(cursorEnd, std::memory_order_relaxed);
+    displayCursorSegmentMask.store(cursorSegmentMask,
+                                   std::memory_order_relaxed);
     displayDecimalMask.store(decimalMask, std::memory_order_relaxed);
     for (unsigned int bank = 0; bank < displayIndicatorOn.size(); ++bank) {
         displayIndicatorOn[bank].store(

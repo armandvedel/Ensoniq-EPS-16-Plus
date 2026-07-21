@@ -72,8 +72,10 @@ static uint32_t negate24(uint32_t value) {
     return ((value ^ 0xffffff) + 1) & 0xffffff;
 }
 
-static uint32_t saturate24(uint32_t value, uint8_t flags, int negative) {
-    if (!(flags & FLAG_V)) return value & 0xffffff;
+static uint32_t saturate24(uint32_t value, uint8_t *flags, int negative) {
+    if (!(*flags & FLAG_V)) return value & 0xffffff;
+    set_flag(flags, FLAG_N, negative);
+    set_flag(flags, FLAG_Z, 0);
     return negative ? 0x800000 : 0x7fffff;
 }
 
@@ -92,8 +94,8 @@ static uint32_t shift_left(uint32_t value, unsigned int shift, uint8_t *flags) {
 static uint32_t alu_operation(uint8_t op, uint32_t a, uint32_t b, uint8_t *flags) {
     uint32_t result;
     switch (op) {
-        case 0: result = add24(a, b, flags); return saturate24(result, *flags, a & 0x800000);
-        case 1: result = add24(a, negate24(b), flags); return saturate24(result, *flags, a & 0x800000);
+        case 0: result = add24(a, b, flags); return saturate24(result, flags, a & 0x800000);
+        case 1: result = add24(a, negate24(b), flags); return saturate24(result, flags, a & 0x800000);
         case 2: return add24(a, b, flags);
         case 3: return add24(a, negate24(b), flags);
         case 4: (void)add24(a, negate24(b), flags); return a;
@@ -220,6 +222,12 @@ void es5510_core_set_host_serial(Es5510Core *core, uint8_t value) {
     core->host_serial = value;
 }
 
+unsigned int es5510_core_dram_address(const Es5510Core *core,
+                                      uint32_t address) {
+    return ((address & core->memmask) >> core->memshift) &
+           (ES5510_DRAM_WORDS - 1);
+}
+
 static int32_t ram_address(Es5510Core *core, uint8_t access, uint32_t offset) {
     uint32_t address;
     if (access == ACCESS_DELAY) {
@@ -228,7 +236,7 @@ static int32_t ram_address(Es5510Core *core, uint8_t access, uint32_t offset) {
     } else if (access == ACCESS_A) address = core->abase + offset;
     else if (access == ACCESS_B) address = core->bbase + offset;
     else return (int32_t)(offset & 0xfffff0);
-    return (int32_t)((address & core->memmask) >> core->memshift);
+    return (int32_t)es5510_core_dram_address(core, address);
 }
 
 static void eject_dol(Es5510Core *core) {
