@@ -1,7 +1,7 @@
 # macOS VST3 and Audio Unit prototype
 
-Status: milestone 1 on branch `vst3-prototype`, based on tag `topsupergold`
-and commit `8371356`.
+Status: milestone 1 on branch `vst3-prototype`, based on tag
+`vst3-prototype-base` and commit `8371356`.
 
 ## Architecture finding
 
