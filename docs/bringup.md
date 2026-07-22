@@ -241,9 +241,9 @@ still be promoted only through independent state-transition tests.
 The EPS-16 Plus OS writes ES5510 Host Serial Control `0x48`: Sony serial
 format, with SER1 configured as the output and SER0, SER2, and SER3 configured
 as inputs. Its effect programs agree with that hardware configuration: they
-read the three input ports and write their result to SER1L/SER1R. ES5505
-Bus1..3 feed SER0/SER2/SER3, the OS-selected SER1 output feeds the main DAC,
-and Aux1 remains separate.
+read the three input ports and write their result to SER1L/SER1R. ES5505 route
+codes `0`, `1`, and `3` (Bus1..3) feed SER0/SER2/SER3, the OS-selected SER1
+output feeds the main DAC, and route code `2` (Aux1) remains separate.
 A deterministic original-OS instrument run now measures ES5505 Bus1 peak
 `44697` and nonzero ESP output peak `3527` (previously exactly zero), with no
 illegal 68000 instructions.  This verifies the digital route, but audible
@@ -370,12 +370,12 @@ The board's unimplemented low address bits in `DLENGTH`, `ABASE`, and `BBASE`
 read high. The ROM verifier requires this `...0f` readback; returning the raw
 written zero bits makes a valid sampling-program load fail with `ERROR 145`.
 
-The native audio path now preserves all four ES5505 stereo buses and executes
+The native audio path now preserves all four ES5505 stereo routes and executes
 the original OS-uploaded ES5510 GPR/instruction program with its external
-delay RAM. ES5505 Bus1, Bus2, and Bus3 feed ES5510 serial inputs 0, 2, and 3;
-the OS-configured serial output 1 feeds the main EPS DAC. The fourth ES5505
-assignment is the separate Aux1 pair. This is device-side routing rather than
-a browser reverb substitute.
+delay RAM. ES5505 route codes `0`, `1`, and `3` for Bus1, Bus2, and Bus3 feed
+ES5510 serial inputs 0, 2, and 3; route code `2` is the separate Aux1 pair.
+The OS-configured serial output 1 feeds the main EPS DAC. This is device-side
+routing rather than a browser reverb substitute.
 During effects, Host Serial Control `48` configures serial port 1 as the main
 DAC output while ports 0, 2, and 3 accept the three ES5505 effect buses. During
 sampling, the uploaded overlay instead consumes the mono ADC at serial input 0
@@ -384,6 +384,14 @@ sampling monitor remains a separate board route. In the VST adapter it is
 active only while the original OS performs current GPR `80` conversions, is
 sent equally to both main outputs, follows the same analog MIC/LINE frontend,
 and then follows the physical master-volume ADC.
+Main-board U41 is the hardware source multiplexer in front of ES5510 serial
+input 0. Its A input is ES5505 `DSER0` (Bus 1), its B input is the mono ADC
+`A/DATA`, and its `SAMPEN` select is MC68681 output OP2. MC68681 output pins
+are active-low relative to the DUART set/reset command latch, so latch bit 2
+set selects Bus 1 and bit 2 reset selects the ADC. Waveboy Audio-In effects
+perform those actual writes at `$28001d/$28001f`; the emulator follows OP2 and
+does not identify effect names or displayed parameters. OP7 independently
+selects the original LINE/MIC analog feedback path.
 The ES5510 host interface also holds execution during an instruction upload and
 its verifier readback; otherwise the running DSP can legally rewrite a GPR
 between two host reads and make the original OS report `EFFECT DOWNLOAD

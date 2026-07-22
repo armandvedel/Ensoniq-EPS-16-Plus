@@ -45,6 +45,10 @@ instructions and the next authentic-engine extraction gate are documented in
 `vst3-prototype` branch; the `vst3-prototype-base` tag marks its unchanged
 authentic-engine baseline.
 
+A short German installation and musician-facing user guide is available as
+[`docs/KURZANLEITUNG-DE.md`](docs/KURZANLEITUNG-DE.md) and is included in the
+VST3 distribution archive.
+
 ## Usage
 
 ```sh

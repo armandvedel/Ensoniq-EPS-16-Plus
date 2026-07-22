@@ -16,6 +16,7 @@ set(STAGE "${PACKAGE_DIR}/EPS-16 Plus Prototype.stage")
 set(FINAL "${PACKAGE_DIR}/EPS-16 Plus Prototype.${BUNDLE_EXTENSION}")
 set(RESOURCES "${PACKAGE_DIR}/EPS_files")
 set(ARCHIVE "${PACKAGE_DIR}/${ARCHIVE_NAME}")
+set(PACKAGE_ITEMS "EPS-16 Plus Prototype.${BUNDLE_EXTENSION}" "EPS_files")
 file(REMOVE_RECURSE "${PACKAGE_DIR}")
 file(MAKE_DIRECTORY "${PACKAGE_DIR}")
 
@@ -37,9 +38,13 @@ run_checked(/usr/bin/codesign --verify --deep --strict --verbose=2 "${STAGE}")
 file(RENAME "${STAGE}" "${FINAL}")
 file(MAKE_DIRECTORY "${RESOURCES}")
 configure_file("${RESOURCE_README}" "${RESOURCES}/README.txt" COPYONLY)
+if(DEFINED USER_GUIDE AND EXISTS "${USER_GUIDE}")
+  configure_file("${USER_GUIDE}" "${PACKAGE_DIR}/KURZANLEITUNG-DE.md" COPYONLY)
+  list(APPEND PACKAGE_ITEMS "KURZANLEITUNG-DE.md")
+endif()
 execute_process(
   COMMAND /usr/bin/zip -qry -X "${ARCHIVE}"
-          "EPS-16 Plus Prototype.${BUNDLE_EXTENSION}" "EPS_files"
+          ${PACKAGE_ITEMS}
   WORKING_DIRECTORY "${PACKAGE_DIR}"
   RESULT_VARIABLE ZIP_RESULT
 )
@@ -48,4 +53,5 @@ if(NOT ZIP_RESULT EQUAL 0)
 endif()
 file(REMOVE_RECURSE "${FINAL}")
 file(REMOVE_RECURSE "${RESOURCES}")
+file(REMOVE "${PACKAGE_DIR}/KURZANLEITUNG-DE.md")
 message(STATUS "Verified package: ${ARCHIVE}")

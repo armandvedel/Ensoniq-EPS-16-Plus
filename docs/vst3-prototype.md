@@ -27,6 +27,14 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   analog transitions; the audio callback performs no queue allocation.
 - Sample-offset MIDI delivery and deterministic conversion of DAW sample time
   to the EPS 10 MHz CPU clock using an integer remainder accumulator.
+- Conventional channel-1 Pitch Bend and Mod Wheel (CC1) drive the original EPS
+  analog wheel channels, while Polyphonic Key Pressure (`A0`) becomes a per-key
+  KPC pressure update for an active key, coalesced to the finite physical
+  transport rate. Note Off cancels pending pressure before sending the release.
+  The EPS has no MPE expression path, so
+  member-channel pitch and Channel Pressure (`D0`) are ignored instead of being
+  converted into artificial keyboard events. The original OS remains
+  responsible for modulation routing and voice response.
 - Stereo DAW input delivery to the emulator sampling boundary for every audio
   sample.
 - Component-derived sampling frontend from analog schematic sheet 3. The

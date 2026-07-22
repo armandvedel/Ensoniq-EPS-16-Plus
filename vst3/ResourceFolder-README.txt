@@ -2,8 +2,8 @@ EPS-16 Plus external files
 ==========================
 
 Place the user-supplied files in this EPS_files folder, next to the installed
-VST3 or Audio Unit plug-in. The plug-in never contains or redistributes these
-copyrighted files.
+VST3 plug-in. The plug-in never contains or redistributes these copyrighted
+files.
 
 Preferred names:
 
@@ -24,12 +24,6 @@ Typical installed layout:
       eps16plus-rom.bin
       eps16plus-kpc.bin
       EPS130OS.img
-
-For the Audio Unit package use the equivalent Components folder:
-
-  ~/Library/Audio/Plug-Ins/Components/
-    EPS-16 Plus Prototype.component
-    EPS_files/
 
 Ableton Live sampling
 ---------------------

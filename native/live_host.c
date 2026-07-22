@@ -450,7 +450,8 @@ static void midi_received(const MIDIPacketList *packets, void *context, void *so
             if (offset + needed > packet->length) break;
             uint8_t data1 = packet->data[offset++];
             uint8_t data2 = needed == 2 ? packet->data[offset++] : 0;
-            if (kind == 0x80 || kind == 0x90 || kind == 0xb0 || kind == 0xe0)
+            if (kind == 0x80 || kind == 0x90 || kind == 0xa0 ||
+                kind == 0xb0 || kind == 0xe0)
                 midi_enqueue(status, data1, data2);
         }
         packet = MIDIPacketNext(packet);

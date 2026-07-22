@@ -5,6 +5,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+static uint32_t keyon_frequency(unsigned int bend) {
+    eps16_probe_machine_midi(0x80, 60, 0);
+    eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 2000000);
+    eps16_probe_machine_midi(0xe0, (uint8_t)(bend & 0x7f),
+                             (uint8_t)((bend >> 7) & 0x7f));
+    eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 5000000);
+    eps16_probe_machine_midi(0x90, 60, 100);
+    eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 1000000);
+    return eps16_probe_machine_last_keyon_frequency();
+}
+
 int main(int argc, char **argv) {
     if (argc != 5) {
         fprintf(stderr,
@@ -51,6 +62,17 @@ int main(int argc, char **argv) {
         fprintf(stderr, "plain MODE field restored visible cursor segments\n");
         return 1;
     }
+    const uint32_t bend_low = keyon_frequency(0);
+    const uint32_t bend_center = keyon_frequency(8192);
+    const uint32_t bend_high = keyon_frequency(16383);
+    printf("pitch_frequency=%u/%u/%u\n", bend_low, bend_center, bend_high);
+    if (!bend_low || !bend_center || !bend_high ||
+        !(bend_low < bend_center && bend_center < bend_high)) {
+        fprintf(stderr, "pitch wheel direction is inverted in the OS path\n");
+        return 1;
+    }
+    eps16_probe_machine_midi(0xe0, 0, 64);
+    eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 5000000);
     eps16_probe_machine_midi(0x80, 60, 0);
     eps16_probe_machine_run_until(eps16_probe_machine_cycles() + 1000000);
     eps16_probe_machine_midi(0x90, 60, 100);

@@ -566,6 +566,9 @@ static void es5510_write_register(uint8_t index, uint32_t value) {
 #define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end, cursor_mask) \
     ((void)0)
 #endif
+#ifndef EPS16_ES5505_KEYON_PUBLISHED
+#define EPS16_ES5505_KEYON_PUBLISHED(voice) ((void)0)
+#endif
 
 static int panel_dotted_digit(uint8_t code, char *digit) {
     /* Original-OS table at CPU c0228c.  These are the KPC/VFD codes for
@@ -674,6 +677,26 @@ static void live_note(unsigned int note, unsigned int velocity, int pressed) {
     uint8_t key = (uint8_t)(note - 36);
     live_schedule_pair(pressed ? (uint8_t)(key | 0x80) : key,
                        pressed ? (uint8_t)(velocity ? velocity : 1) : 1);
+}
+
+static void live_performance_midi(uint8_t status, uint8_t data1,
+                                  uint8_t data2) {
+    const unsigned int kind = status & 0xf0;
+    if (kind == 0x90 && data2)
+        live_note(data1, data2, 1);
+    else if (kind == 0x80 || (kind == 0x90 && !data2))
+        live_note(data1, data2, 0);
+    else if (kind == 0xa0)
+        live_note(data1, data2, 1);
+    else if (kind == 0xe0) {
+        const unsigned int bend = data1 | ((unsigned int)data2 << 7);
+        analog_values[0] =
+            (uint16_t)((((16383U - bend) * 1023U) / 16383U) << 6);
+    } else if (kind == 0xb0 && data1 == 1) {
+        const unsigned int wheel =
+            1023U - ((unsigned int)data2 * 1023U) / 127U;
+        analog_values[2] = (uint16_t)(wheel << 6);
+    }
 }
 
 static void live_mount_disk(const char *env_name, const char *label) {
@@ -880,20 +903,8 @@ static void live_service(void) {
     char line[512];
     while (live_host_poll_line(line, sizeof(line))) live_command(line);
     LiveMidiEvent event;
-    while (live_host_poll_midi(&event)) {
-        unsigned int kind = event.status & 0xf0;
-        if (kind == 0x90 && event.data2)
-            live_note(event.data1, event.data2, 1);
-        else if (kind == 0x80 || (kind == 0x90 && !event.data2))
-            live_note(event.data1, event.data2, 0);
-        else if (kind == 0xe0) {
-            unsigned int bend = event.data1 | ((unsigned int)event.data2 << 7);
-            analog_values[0] = (uint16_t)(((bend * 1023U) / 16383U) << 6);
-        } else if (kind == 0xb0 && event.data1 == 1) {
-            unsigned int wheel = 1023U - ((unsigned int)event.data2 * 1023U) / 127U;
-            analog_values[2] = (uint16_t)(wheel << 6);
-        }
-    }
+    while (live_host_poll_midi(&event))
+        live_performance_midi(event.status, event.data1, event.data2);
 }
 
 static void write_le16(FILE *output, uint16_t value) {
@@ -1019,6 +1030,11 @@ static void es5505_write16(unsigned int address, uint16_t value) {
                 (voice->control >> 2) & 1, voice->left_volume,
                 voice->right_volume, voice->k1, voice->k2);
     }
+    if (page_before < 0x20 && reg == 0 &&
+        (control_before & ES5505_STOP_MASK) &&
+        !(es5505.voices[page_before].control & ES5505_STOP_MASK) &&
+        es5505.voices[page_before].start < es5505.voices[page_before].end)
+        EPS16_ES5505_KEYON_PUBLISHED(page_before);
 }
 
 static void es5505_write8(unsigned int address, uint8_t value) {

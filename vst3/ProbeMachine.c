@@ -7,14 +7,17 @@
 static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
                                    int cursor_start, int cursor_end,
                                    uint32_t cursor_mask);
+static void plugin_capture_keyon(unsigned int voice);
 
 #define EPS16_PANEL_DISPLAY_PUBLISHED(display, decimal_mask, cursor_start, cursor_end, cursor_mask) \
     plugin_capture_display((display), (decimal_mask), (cursor_start), (cursor_end), (cursor_mask))
+#define EPS16_ES5505_KEYON_PUBLISHED(voice) plugin_capture_keyon((voice))
 #define EPS16_ROM_PROBE_CONTEXT 1
 #define main eps16_probe_cli_main
 #include "../native/rom_probe.c"
 #undef main
 #undef EPS16_ROM_PROBE_CONTEXT
+#undef EPS16_ES5505_KEYON_PUBLISHED
 #undef EPS16_PANEL_DISPLAY_PUBLISHED
 
 #include "m68kcpu.h"
@@ -40,6 +43,7 @@ typedef struct {
     uint32_t published_decimal_mask;
     uint32_t published_cursor_mask;
     int published_cursor_start, published_cursor_end;
+    uint32_t last_keyon_frequency;
 } PluginRuntimeState;
 
 struct Eps16ProbeMachine {
@@ -75,6 +79,8 @@ static _Thread_local Eps16ProbeMachine *plugin_current_machine;
     (plugin_current_machine->plugin.published_cursor_start)
 #define plugin_published_cursor_end \
     (plugin_current_machine->plugin.published_cursor_end)
+#define plugin_last_keyon_frequency \
+    (plugin_current_machine->plugin.last_keyon_frequency)
 
 static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
                                    int cursor_start, int cursor_end,
@@ -85,6 +91,11 @@ static void plugin_capture_display(const char display[23], uint32_t decimal_mask
     plugin_published_cursor_mask = cursor_mask;
     plugin_published_cursor_start = cursor_start;
     plugin_published_cursor_end = cursor_end;
+}
+
+static void plugin_capture_keyon(unsigned int voice) {
+    if (plugin_current_machine && voice < ES5505_VOICES)
+        plugin_last_keyon_frequency = es5505.voices[voice].frequency;
 }
 
 #define PLUGIN_SNAPSHOT_FIELDS(X) \
@@ -273,14 +284,23 @@ static void plugin_render_audio(uint64_t elapsed_cycles, uint64_t end_cycle) {
                 if (magnitude > es5505_bus_peak[bus])
                     es5505_bus_peak[bus] = magnitude;
             }
+            /* Main-board U41 (74LS157) selects either ES5505 DSER0 or the
+               mono ADC A/DATA for ES5510 SER0. Its SAMPEN select is the
+               physical MC68681 OP2 pin, which is active-low relative to the
+               DUART set/reset command latch. Waveboy effects use those
+               ordinary hardware writes; no effect-name recognition is
+               involved. */
+            const int external_input_selected = !(duart_output & 0x04);
             const int16_t esp_inputs[8] = {
-                audio_to_pcm16(buses[0][frame]),
-                audio_to_pcm16(buses[1][frame]),
+                external_input_selected ? plugin_input_sample
+                                        : audio_to_pcm16(buses[0][frame]),
+                external_input_selected ? 0
+                                        : audio_to_pcm16(buses[1][frame]),
                 0, 0,
                 audio_to_pcm16(buses[2][frame]),
                 audio_to_pcm16(buses[3][frame]),
-                audio_to_pcm16(buses[4][frame]),
-                audio_to_pcm16(buses[5][frame])
+                audio_to_pcm16(buses[6][frame]),
+                audio_to_pcm16(buses[7][frame])
             };
             int16_t esp_outputs[2] = {0, 0};
             if (es5510_host_upload_active &&
@@ -352,6 +372,7 @@ int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
     plugin_published_cursor_mask = 0;
     plugin_published_cursor_start = -1;
     plugin_published_cursor_end = -1;
+    plugin_last_keyon_frequency = 0;
 
     m68k_init();
     es5505_core_init(&es5505, es5505_sample_read, NULL);
@@ -509,10 +530,13 @@ size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
 void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2) {
     if (!plugin_initialized) return;
     const unsigned int kind = status & 0xf0;
+    const unsigned int channel = status & 0x0f;
     if (kind == 0x90 && data2)
         live_note(data1, data2, 1);
     else if (kind == 0x80 || (kind == 0x90 && !data2))
         live_note(data1, data2, 0);
+    else if ((kind == 0xe0 || (kind == 0xb0 && data1 == 1)) && channel == 0)
+        live_performance_midi(status, data1, data2);
 }
 
 void eps16_probe_machine_panel_byte(uint8_t value) {
@@ -587,6 +611,18 @@ int eps16_probe_machine_sampling_monitor_active(void) {
 
 unsigned int eps16_probe_machine_master_volume(void) {
     return plugin_initialized ? analog_values[5] >> 6 : 0;
+}
+
+unsigned int eps16_probe_machine_analog_value(unsigned int channel) {
+    return plugin_initialized && channel < 8 ? analog_values[channel] >> 6 : 0;
+}
+
+size_t eps16_probe_machine_panel_rx_consumed(void) {
+    return plugin_initialized ? panel_rx_consumed : 0;
+}
+
+uint32_t eps16_probe_machine_last_keyon_frequency(void) {
+    return plugin_initialized ? plugin_last_keyon_frequency : 0;
 }
 
 void eps16_probe_machine_cursor(int *start, int *end) {
@@ -842,6 +878,7 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
                    ? disk_image + header.fdc_data_offset : NULL;
     plugin_audio_queue_read = 0;
     plugin_audio_queue_write = 0;
+    plugin_last_keyon_frequency = 0;
     if (error && error_size) error[0] = '\0';
     return reader.current == reader.end;
 }

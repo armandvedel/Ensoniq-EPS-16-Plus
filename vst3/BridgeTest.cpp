@@ -71,9 +71,13 @@ int main() {
     std::array<float, frames> outputRight{};
     inputLeft.fill(0.25f);
     inputRight.fill(-0.125f);
-    const MidiEvent midi[] = {{0, 0x90, 60, 100}, {24000, 0x80, 60, 0}};
+    const MidiEvent midi[] = {
+        {0, 0x90, 60, 100}, {4800, 0xa0, 60, 50},
+        {9600, 0xd0, 64, 0}, {14400, 0xb0, 1, 96},
+        {19200, 0xe0, 0, 64}, {24000, 0x80, 60, 0}
+    };
     bridge.process(inputLeft.data(), inputRight.data(), outputLeft.data(),
-                   outputRight.data(), frames, midi, 2);
+                   outputRight.data(), frames, midi, 6);
 
     assert(bridge.cpuCycles() == kCpuClockHz);
     assert(sink.lastRunCycle == kCpuClockHz);
@@ -90,9 +94,18 @@ int main() {
     assert(sink.analogMessages[0].value == 128);
     assert(sink.analogMessages[1].value == 384);
     assert(sink.analogMessages[2].value == 715);
-    assert(sink.midiMessages.size() == 2);
+    assert(sink.midiMessages.size() == 6);
     assert(sink.midiMessages[0].cycle == 0);
-    assert(sink.midiMessages[1].cycle == 5000000);
+    assert(sink.midiMessages[1].value == 0xa0 &&
+           sink.midiMessages[1].cycle == 1000000);
+    assert(sink.midiMessages[2].value == 0xd0 &&
+           sink.midiMessages[2].cycle == 2000000);
+    assert(sink.midiMessages[3].value == 0xb0 &&
+           sink.midiMessages[3].cycle == 3000000);
+    assert(sink.midiMessages[4].value == 0xe0 &&
+           sink.midiMessages[4].cycle == 4000000);
+    assert(sink.midiMessages[5].value == 0x80 &&
+           sink.midiMessages[5].cycle == 5000000);
     assert(sink.lastMidiData1 == 60 && sink.lastMidiData2 == 0);
     assert(bridge.droppedControls() == 0);
 
