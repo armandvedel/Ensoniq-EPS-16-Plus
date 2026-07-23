@@ -192,11 +192,14 @@ it opens the effect-selection menu. The earlier `COULD NOT BE DOWNLOADED`
 response was a downstream ES5510 host-access/execution issue, not a
 panel-matrix failure. The device path now pauses the DSP during program upload
 and verifier readback; successful live effect selection remains to be retested.
-The browser enables provisional mappings with a visual marker.
-RECORD, STOP/CONTINUE, and PLAY remain disabled:
-five event values (`3a,3b,40,41,43`) remain for three visible transport
-buttons plus two non-button KPC events, so assigning them without a
-context-sensitive OS transition would be guesswork.
+The three sequencer controls are now identified without relying on a menu or
+display string.  The service-manual keypad self-test prints `0.`, `5`, and
+`6.` for RECORD, STOP/CONTINUE, and PLAY.  Combining those physical glyphs
+with the KPC scan order and the ROM translation table below gives raw matrix
+positions `03`, `17`, and `1d`, respectively (OS values `40`, `43`, and
+`41`).  An original-OS round trip confirms that holding raw `03` while raw
+`1d` is pressed creates and records `SEQUENCE 01`; raw `17` then enters STOP.
+Raw `00`/`01` are the two remaining non-button matrix events.
 
 ## Original-OS matrix translation
 

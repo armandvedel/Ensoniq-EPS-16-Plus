@@ -21,6 +21,16 @@ public:
     void focusLost(FocusChangeType) override;
 
 private:
+    class EpsFaderLookAndFeel final : public juce::LookAndFeel_V4 {
+    public:
+        void drawLinearSlider(juce::Graphics &, int x, int y, int width,
+                              int height, float sliderPosition,
+                              float minimumSliderPosition,
+                              float maximumSliderPosition,
+                              juce::Slider::SliderStyle,
+                              juce::Slider &) override;
+    };
+
     class VfdLabel final : public juce::Label {
     public:
         void setCursorSegmentMask(std::uint32_t mask);
@@ -42,6 +52,7 @@ private:
     public:
         PanelButton(Eps16PlusProcessor &, juce::String label,
                     std::uint8_t rawCode, bool mappingKnown = true);
+        void setShiftChordCode(std::uint8_t rawCode);
         void mouseDown(const juce::MouseEvent &) override;
         void mouseUp(const juce::MouseEvent &) override;
         void mouseExit(const juce::MouseEvent &) override;
@@ -50,7 +61,9 @@ private:
         void releaseIfNeeded();
         Eps16PlusProcessor &processor;
         const std::uint8_t code;
+        std::uint8_t shiftChordCode{0xff};
         bool pressed{};
+        bool shiftChordPressed{};
     };
 
     class DiskButton final : public juce::Button {
@@ -74,6 +87,7 @@ private:
     Eps16PlusProcessor &owner;
     VfdLabel vfd;
     juce::Label status;
+    EpsFaderLookAndFeel faderLookAndFeel;
     juce::Slider masterVolume;
     juce::Slider dataEntry;
     DiskButton osDiskButton{"Insert OS disk", "OS"};

@@ -42,13 +42,29 @@ int main(int argc, char **argv) {
     eps16_probe_machine_midi(0xb0, 1, 127);
     if (!expect_analog(2, 0)) failed = 1;
 
+    /* Host transport is serialized into the real MC68681 channel-A receive
+       path. The original OS must consume the realtime bytes; ordinary notes
+       below deliberately retain their established direct KPC path. */
+    const size_t clock_before = eps16_probe_machine_midi_rx_consumed();
+    eps16_probe_machine_midi(0xfa, 0, 0);
+    eps16_probe_machine_midi(0xf8, 0, 0);
+    eps16_probe_machine_midi(0xfc, 0, 0);
+    run_for(2000000);
+    const size_t clock_after = eps16_probe_machine_midi_rx_consumed();
+    printf("midi_clock_bytes=%zu/%zu\n", clock_before, clock_after);
+    if (clock_after != clock_before + 3) failed = 1;
+
     const size_t before = eps16_probe_machine_panel_rx_consumed();
     eps16_probe_machine_midi(0x90, 60, 100);
     run_for(20000000);
     const size_t after_note = eps16_probe_machine_panel_rx_consumed();
+    const size_t pressure_midi_before =
+        eps16_probe_machine_midi_rx_consumed();
     eps16_probe_machine_midi(0xa0, 60, 50);
     run_for(20000000);
     const size_t after_pressure = eps16_probe_machine_panel_rx_consumed();
+    const size_t pressure_midi_after =
+        eps16_probe_machine_midi_rx_consumed();
     eps16_probe_machine_midi(0x80, 60, 0);
     run_for(20000000);
     const size_t after_release = eps16_probe_machine_panel_rx_consumed();
@@ -56,6 +72,24 @@ int main(int argc, char **argv) {
     run_for(20000000);
     const size_t after_released_pressure =
         eps16_probe_machine_panel_rx_consumed();
+
+    /* Conventional channel-1 poly pressure enters the original MIDI receive
+       path. Even a dense stream cannot delay the established direct KPC
+       release path or turn pressure into another local key-down packet. */
+    eps16_probe_machine_midi(0x90, 64, 100);
+    run_for(20000000);
+    const size_t before_dense_pressure =
+        eps16_probe_machine_panel_rx_consumed();
+    const size_t before_dense_pressure_midi =
+        eps16_probe_machine_midi_rx_consumed();
+    for (unsigned int value = 0; value < 64; ++value)
+        eps16_probe_machine_midi(0xa0, 64, (uint8_t)value);
+    eps16_probe_machine_midi(0x80, 64, 0);
+    run_for(20000000);
+    const size_t after_dense_release =
+        eps16_probe_machine_panel_rx_consumed();
+    const size_t after_dense_pressure_midi =
+        eps16_probe_machine_midi_rx_consumed();
 
     /* Push-class MPE traffic arrives densely: note events use member channels,
        followed by a stream of per-note channel pressure and pitch bend.  The
@@ -82,15 +116,23 @@ int main(int argc, char **argv) {
     const size_t after_released_mpe_pressure =
         eps16_probe_machine_panel_rx_consumed();
 
-    printf("keyboard_bytes=%zu/%zu/%zu/%zu/%zu mpe=%zu/%zu/%zu/%zu "
-           "illegal=%zu\n", before, after_note, after_pressure, after_release,
-           after_released_pressure, after_mpe_note, after_mpe_pressure,
-           after_mpe_release, after_released_mpe_pressure,
+    printf("keyboard_bytes=%zu/%zu/%zu/%zu/%zu pressure_midi=%zu/%zu "
+           "dense=%zu/%zu midi=%zu/%zu "
+           "mpe=%zu/%zu/%zu/%zu illegal=%zu\n",
+           before, after_note, after_pressure, after_release,
+           after_released_pressure, pressure_midi_before, pressure_midi_after,
+           before_dense_pressure, after_dense_release,
+           before_dense_pressure_midi, after_dense_pressure_midi,
+           after_mpe_note,
+           after_mpe_pressure, after_mpe_release, after_released_mpe_pressure,
            eps16_probe_machine_illegal_instructions());
     if (after_note != before + 2 || after_pressure != after_note ||
-        after_release != after_note + 2 ||
+        pressure_midi_after != pressure_midi_before + 3 ||
+        after_release != after_pressure + 2 ||
         after_released_pressure != after_release ||
-        after_mpe_note != after_released_pressure ||
+        after_dense_release != before_dense_pressure + 2 ||
+        after_dense_pressure_midi != before_dense_pressure_midi + 64 * 3 ||
+        after_mpe_note != after_dense_release ||
         after_mpe_pressure != after_mpe_note ||
         after_mpe_release != after_mpe_note + 4 ||
         after_released_mpe_pressure != after_mpe_release ||

@@ -168,7 +168,8 @@ add_custom_target(eps16_vst3_package
           "-DSOURCE_BUNDLE=$<TARGET_BUNDLE_DIR:Eps16Plus_VST3>"
           "-DPACKAGE_DIR=${CMAKE_BINARY_DIR}/vst3-package"
           "-DRESOURCE_README=${CMAKE_CURRENT_SOURCE_DIR}/ResourceFolder-README.txt"
-          "-DUSER_GUIDE=${CMAKE_SOURCE_DIR}/docs/KURZANLEITUNG-DE.md"
+          "-DTHIRD_PARTY_NOTICES=${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+          "-DJUCE_LICENSE=${EPS16_JUCE_DIR}/LICENSE.md"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/PackageMac.cmake"
   DEPENDS Eps16Plus_VST3
   VERBATIM
@@ -219,6 +220,11 @@ target_link_libraries(eps16_command_instrument_workflow_test PRIVATE
 
 add_executable(eps16_performance_midi_test PerformanceMidiTest.c)
 target_link_libraries(eps16_performance_midi_test PRIVATE eps16_probe_machine)
+
+add_executable(eps16_sequencer_transport_test SequencerTransportTest.c)
+target_link_libraries(eps16_sequencer_transport_test PRIVATE
+  eps16_probe_machine
+)
 
 add_executable(eps16_disk_load_workflow_test
   DiskLoadWorkflowTest.cpp

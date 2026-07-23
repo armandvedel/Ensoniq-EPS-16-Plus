@@ -158,8 +158,11 @@ The combined 128 KiB ROM has SHA-256
   from the same original-OS table. Raw `07` is
   live-confirmed as EFFECT SELECT because it
   opens the effect-selection menu. A subsequent `COULD NOT BE DOWNLOADED`
-  response belongs to the downstream ES5510/effect-download path. RECORD,
-  STOP/CONTINUE, and PLAY remain unassigned pending confirmation.
+  response belongs to the downstream ES5510/effect-download path. The
+  service-manual self-test glyphs plus the ROM matrix table identify RECORD,
+  STOP/CONTINUE, and PLAY as raw `03`, `17`, and `1d`; an original-OS test
+  records `SEQUENCE 01` with the overlapping RECORD+PLAY edges and stops it
+  with raw `17`.
 - ENTER/YES is now end-to-end verified as matrix index `23`. Press `a3 00`
   advances the original OS from `FILE 4  JAZZ BASS` to
   `PICK INSTRUMENT BUTTON`.

@@ -1,214 +1,244 @@
-# EPS-16 Plus reverse-engineering foundation
+# Ensoniq EPS-16 Plus VST3 Emulator
 
-This project contains a clean-room toolchain for inspecting an HxC HFE disk
-image supplied by the user. It does **not** contain the Ensoniq operating
-system or any ROM data.
+Hardware-level emulation of the Ensoniq EPS-16 Plus sampler for Apple Silicon
+Macs, built as a resizable VST3 instrument.
 
-Current capabilities:
+![EPS-16 Plus VST3 panel](docs/images/eps16-plus-vst3-panel.png)
 
-- parse HFE v1 images;
-- deinterleave both floppy sides;
-- decode IBM MFM address and data marks;
-- validate every ID and data CRC;
-- rebuild a sector-ordered 800 KiB image;
-- accept validated EPS HFE v1 files directly wherever the native emulator
-  accepts a logical IMG, without changing the IMG path;
-- emit a machine-readable analysis report;
-- parse the Ensoniq directory and 24-bit file-allocation table;
-- extract OS, effects, instruments, banks and sequence files by their FAT chain;
-- provide a small big-endian memory bus for the 68000 emulator;
-- provide a deterministic SCSI-1 disk target with READ/WRITE (6/10), inquiry,
-  sense and capacity commands.
-- combine split U27/U28 ROMs and validate the 68000 reset vectors;
-- execute the real v1.00F reset path with MMIO access tracing;
-- boot the unmodified ROM from the supplied logical OS disk into the loaded
-  scheduler using minimal DUART and WD1772 models;
-- deliver vectored MC68681 timer interrupts to the running original OS;
-- perform the EPS panel echo handshake and reconstruct its 1x22 display text.
-- queue bidirectional panel packets for GUI-generated buttons and keys;
-- model ES5510 host-side program/DRAM uploads;
-- render ES5505 PCM voices with interpolation, exponential stereo volume,
-  hardware loop modes and the four-pole K1/K2 filter.
+## About the EPS-16 Plus
 
-Current reverse-engineering results are recorded in
-[`docs/bringup.md`](docs/bringup.md). The GUI/OS ownership boundary, access
-methods, ranges, persistence, risks, and verification state are tracked in
-[`docs/parameter-mapping.md`](docs/parameter-mapping.md). The 36 physical front
-panel controls, four-byte click framing, and currently verified wire indices are documented in
-[`docs/panel-protocol.md`](docs/panel-protocol.md). Findings from the
-user-supplied KPC 2.33 ROM are recorded without bundling it in
-[`docs/kpc-reference.md`](docs/kpc-reference.md).
+The EPS-16 Plus is a performance sampler whose character comes from much more
+than its sample memory. Its pitch interpolation, voice architecture, filters,
+loop modes, modulation, envelopes, effects, sampling path and original
+operating system all contribute to the way the instrument feels and sounds.
 
-The separated first macOS VST3 host milestone, its exact limitations, build
-instructions and the next authentic-engine extraction gate are documented in
-[`docs/vst3-prototype.md`](docs/vst3-prototype.md). It is developed on the
-`vst3-prototype` branch; the `vst3-prototype-base` tag marks its unchanged
-authentic-engine baseline.
+This project does not replace that workflow with a modern sample player. It
+recreates the hardware around the original Ensoniq software: the Motorola
+68000 program, keyboard/panel controller, ES5505 voice chip, ES5510 effects
+processor, floppy controller, display and audio paths are presented to the
+unaltered EPS operating system.
 
-A short German installation and musician-facing user guide is available as
-[`docs/KURZANLEITUNG-DE.md`](docs/KURZANLEITUNG-DE.md) and is included in the
-VST3 distribution archive.
+The original EPS OS remains in charge. A click in the GUI becomes the same
+kind of hardware event as a physical button press; the emulator does not infer
+menus from text or bypass the sampler's own logic.
 
-## Usage
+## Download
 
-```sh
-python3 -m eps16.hfe /path/to/EPS130OS.hfe \
-  --output work/generated/EPS130OS.img \
-  --report work/generated/EPS130OS.json
+### [Download EPS-16 Plus Prototype 1.0 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-1.0-Beta-arm64.zip)
 
-python3 -m eps16.disk_compare /path/to/disk.hfe /path/to/reference.img \
-  --report work/generated/hfe-vs-img-sectors.json
+SHA-256:
+`1163cf0412532ca843f9c7471f56db4095e927a881485eb0c74cd4dd0e126186`
 
-python3 -m eps16.inspect work/generated/EPS130OS.img \
-  --report work/generated/inspection.json
+This build requires an Apple Silicon Mac, macOS 11 or newer and a VST3-capable
+DAW. It contains **VST3 only**; no Audio Unit is included.
 
-python3 -m eps16.filesystem work/generated/EPS130OS.img \
-  --output-dir work/generated/files \
-  --report work/generated/filesystem.json
+> **Original Ensoniq files are required.** ROM, KPC firmware and operating
+> system disk images are copyrighted and are not included in this repository
+> or download.
 
-python3 -m eps16.rom --upper /path/to/upper.u28 --lower /path/to/lower.u27 \
-  --output work/generated/eps16plus-rom.bin \
-  --report work/generated/rom.json
+## What is working?
 
-python3 -m unittest discover -s tests -v
-```
+- The original EPS-16 Plus ROM, operating system and KPC panel firmware paths.
+- Authentic 22-cell Futaba-style VFD, indicators, decimal points and
+  OS-controlled cursor segments.
+- ES5505 sample voices with hardware interpolation, looping, envelopes,
+  panning, four-pole filtering and per-voice behavior.
+- ES5510 effects and routing, including repeated switching between ROM effects
+  10, 11, 12 and 13 and Waveboy external-input programs.
+- LINE sampling and the modeled MIC preamp/input filter, with recording and
+  audible playback controlled by the original OS.
+- Eight instruments/tracks, layers, wavesamples, stacking and the original
+  front-panel editing workflow.
+- MIDI notes and velocity, Pitch Wheel, Mod Wheel and channel-1 polyphonic
+  aftertouch delivered through the appropriate emulated hardware paths.
+- Original EPS sequencer controls. Ableton tempo, Start, Continue and Stop can
+  drive the EPS through MIDI Clock when `CLOCK SOURCE=MIDI` is selected.
+- Independent plug-in instances and complete DAW project/preset restore,
+  including sample RAM, instruments, effects, display/parser state and mounted
+  disk.
+- EPS floppy images: insert IMG or HFE, swap multiple disks, create a blank
+  disk and save as IMG or hardware-compatible HFE.
+- Resizable, hardware-inspired panel with mouse-operated Data Entry, volume,
+  arrow keys and original button layout.
 
-## Native 68000 core
+![EPS VFD, disk controls and media name](docs/images/eps16-plus-vst3-display.png)
 
-The native emulator uses the MIT-licensed
-[Musashi](https://github.com/kstenerud/Musashi) core. It is intentionally an
-external build dependency and is not copied into this repository:
+## Installation
 
-```sh
-git clone --depth 1 https://github.com/kstenerud/Musashi work/deps/Musashi
-make test
-```
+1. Quit the DAW and unpack the ZIP.
+2. Copy `EPS-16 Plus Prototype.vst3` to:
 
-A CMake build is also supplied for IDE integration.
+   ```text
+   ~/Library/Audio/Plug-Ins/VST3/
+   ```
 
-The first native target executes a synthetic reset vector and verifies a real
-68000 `MOVEQ`/`STOP` sequence. The ROM probe now follows the real reset path,
-loads OS 1.30 from the virtual floppy and runs its interrupt-driven scheduler.
-The front panel and audio devices are still partial stubs.
+3. Copy the included `EPS_files` folder beside the VST3 bundle.
+4. Add your own legally obtained files to `EPS_files`:
 
-The second native target disassembles a loadable Ensoniq file without bundling
-it into the project:
+   ```text
+   eps16plus-rom.bin   combined 128 KiB U28/U27 main ROM
+   eps16plus-kpc.bin   32 KiB KPC 2.33 EPROM
+   EPS130OS.img        819,200-byte EPS-16 Plus OS disk
+   ```
 
-```sh
-work/build/eps16_disasm work/generated/files/00_EPS-16+_O.S._1b.bin 0x204 64
-work/build/eps16_disasm work/generated/eps16plus-rom.bin 0x11604 64 0xc00000
-work/build/eps16_rom_probe work/generated/eps16plus-rom.bin 200000
-work/build/eps16_rom_probe work/generated/eps16plus-rom.bin 100000000 \
-  work/generated/EPS130OS.img
+   `EPS130OS.hfe` is also accepted. The original filename
+   `Ensoniq EPS KPC2 v2.33 27c256.BIN` is recognized without renaming.
 
-# Inject panel bytes 0x81,0x00 after 300 million cycles:
-work/build/eps16_rom_probe work/generated/eps16plus-rom.bin 500000000 \
-  work/generated/EPS130OS.img 8100 300000000
+5. Start the DAW, rescan VST3 plug-ins and insert the emulator as an
+   instrument. A successful boot normally reaches `NO INSTRUMENTS`.
 
-# Optional reverse-engineering snapshot of the loaded 64 KiB OS RAM:
-EPS16_DUMP_OS_RAM=/tmp/eps16-osram.bin \
-  work/build/eps16_rom_probe work/generated/eps16plus-rom.bin 100000000 \
-  work/generated/EPS130OS.img
-```
-
-The probe also supports an in-session floppy swap and multiple timed panel
-packets. This keeps the original OS running while a test replaces the boot
-disk with an instrument disk:
-
-```sh
-EPS16_SWAP_DISK=/path/to/ED-001.IMG \
-EPS16_SWAP_CYCLE=110000000 \
-EPS16_PANEL_SCRIPT='350000000:a300,360000000:2300,500000000:8200,550000000:0200' \
-  work/build/eps16_rom_probe work/generated/eps16plus-rom.bin 1500000000 \
-  work/generated/EPS130OS.img
-```
-
-`LOGICAL_DISK_IMG` and `EPS16_SWAP_DISK` accept either the existing exact
-819,200-byte IMG format or a CRC-valid EPS HFE v1 image. Format detection uses
-the HFE signature, not the filename extension.
-
-An external 32 KiB KPC 2.33 EPROM can be structurally validated at startup:
-
-```sh
-EPS16_KPC_ROM='/path/to/Ensoniq EPS KPC2 v2.33 27c256.BIN' \
-  work/build/eps16_rom_probe work/generated/eps16plus-rom.bin 220000000 \
-  work/generated/EPS130OS.img
-```
-
-Without another switch this reports `execution=legacy-model`: the ROM is
-loaded and validated, but the established live behavior remains unchanged.
-An isolated, no-browser/no-audio diagnostic can opt into the incomplete
-68HC11 path with `EPS16_KPC_EXECUTE=1`. It currently verifies the real
-normal-state `e7 -> ff` handshake; it is not yet suitable for the live UI
-because the keyboard-scanner capture interrupts and physical matrix ports
-remain incomplete. See `docs/kpc-migration.md`.
-
-`EPS16_PANEL_SCRIPT` is a comma-separated list of `cycle:hex-bytes` events.
-The example starts in the OS's boot-default LOAD/Instrument page, then uses
-ENTER/YES and Instrument/Track-1. Loading starts on the Track-1 release.
-Unknown panel codes are not treated as stable API.
-
-After loading, select Track 1 once more, inject Middle C, and capture the live
-ES5505 mix as a stereo WAV:
-
-```sh
-EPS16_AUDIO_WAV=work/generated/jazz-bass-middle-c-timing-fixed.wav \
-EPS16_AUDIO_START_CYCLE=990000000 \
-EPS16_AUDIO_END_CYCLE=1030000000 \
-EPS16_SWAP_DISK=/path/to/ED-001.IMG \
-EPS16_SWAP_CYCLE=110000000 \
-EPS16_PANEL_SCRIPT='350000000:a300,360000000:2300,500000000:8200,550000000:0200,850000000:8200,860000000:0200,1000000000:9864,1010000000:1801' \
-  work/build/eps16_rom_probe work/generated/eps16plus-rom.bin 1030000000 \
-  work/generated/EPS130OS.img
-```
-
-`98 64` is Middle C press with velocity 100; `18 01` is its release. The WAV
-uses the EPS-16 Plus ES5505 output rate derived from its 10 MHz clock and 21
-active voice slots (29,761 Hz in this run).
-
-An original-layout diagnostic panel is available at `panel/index.html`. It
-implements the manual's LOAD/INSTRUMENT navigation, including the ED-001 file
-catalog and block counts, and records the exact button sequence. Hardware codes
-that are not yet confirmed remain visibly marked. It is intentionally separate
-from the later streamlined plugin UI.
-
-The EDIT and COMMAND navigation is sourced from the supplied 260-page German
-EPS-16 PLUS manual and kept in `panel/menu-catalog.js`. Empty hardware pages are
-left empty; effect parameter pages are explicitly dynamic because their fields
-depend on the selected effect algorithm.
-
-The extracted image is intentionally written outside this project by default.
-Do not commit or redistribute copyrighted OS images.
-
-## Confirmed properties of the supplied image
-
-- HxC HFE v1, 80 cylinders, 2 sides, 250 kbit/s
-- 10 sectors per track, 512 bytes per sector
-- sector IDs use values 0 through 9 and physical skewing
-- 1,600 of 1,600 sectors decode successfully
-- 1,600 valid ID CRCs and 1,600 valid data CRCs
-- logical image size: 819,200 bytes
-- disk identifier: `EPS130OID`
-- 68000 code begins in the first allocated data region
-
-## Emulator boundary
-
-The intended design keeps the original OS behind an emulated hardware bus:
+The resulting layout should be:
 
 ```text
-modern GUI <-> parameter adapter <-> 68000 + original OS <-> virtual hardware
+~/Library/Audio/Plug-Ins/VST3/
+  EPS-16 Plus Prototype.vst3
+  EPS_files/
+    eps16plus-rom.bin
+    eps16plus-kpc.bin
+    EPS130OS.img
 ```
 
-The GUI will never depend on the original front-panel layout. Initially the
-adapter can generate front-panel events. Once RAM structures are understood,
-it can expose direct parameters and DAW automation without changing the audio
-model.
+The original EPS-16 Plus manual remains the reference for sampling,
+instruments, layers, wavesamples, loops and synthesis.
 
-## Fast sample loading
+## Audio and MIDI
 
-Floppy timing is not part of the audio model. The emulator can boot from HFE
-for compatibility while exposing a virtual SCSI disk for normal use. SCSI
-commands operate without host-side delays; the scheduler may fast-forward the
-68000 until the OS finishes parsing and allocating a sample. A later direct
-loader can bypass the OS file dialog, but should still hand the final state to
-the original OS routines rather than guessing at live RAM invariants.
+Load the plug-in on a MIDI instrument track. MIDI notes 36–96 play the
+virtual 61-key EPS keyboard. Notes outside the physical keyboard range are
+ignored.
+
+Pitch Wheel and Mod Wheel feed the original global controller inputs. The EPS
+is not an MPE instrument: member-channel MPE expression is deliberately not
+translated into invented EPS functions. Standard Note On/Off remains on the
+direct, stable keyboard path.
+
+When the plug-in window has keyboard focus, the computer arrow keys operate
+the four physical EPS arrow buttons. Use Left/Right to move between menu pages
+or fields and Up/Down to change the value selected by the original OS. The
+keys are not captured when another window has focus.
+
+The plug-in provides a stereo main output and an additional stereo
+`Sampling Input`. In Ableton Live, route audio to that input with the
+plug-in's input/sidechain chooser. MIC/LINE selection, threshold, input filter,
+recording and sample assignment are still performed on the EPS panel through
+the original OS.
+
+## Sequencer sync
+
+The GUI exposes the original `RECORD`, `STOP / CONT` and `PLAY` buttons.
+Recording on the hardware requires holding RECORD while pressing PLAY; in the
+plug-in use **Shift-click on PLAY** for the same overlapping button gesture.
+
+Ableton tempo and transport are serialized as standard MIDI realtime bytes and
+received by the emulated EPS MIDI hardware. Select `CLOCK SOURCE=MIDI` inside
+the EPS to follow the DAW. With `INTERNAL`, the EPS continues to use its own
+clock.
+
+## Floppy controls
+
+The four small disk buttons are emulator media controls. They do not replace
+the large original EPS `LOAD` mode button.
+
+| Button | Action |
+| --- | --- |
+| `OS` | Reinsert the configured EPS operating-system disk. |
+| `NEW` | Insert a freshly formatted blank 800 KiB EPS disk. |
+| `LOAD` | Insert an existing IMG or HFE v1 disk image. |
+| `SAVE` | Export the mounted disk, including OS-written changes, as IMG or HFE. |
+
+Use IMG for convenient backups and emulator interchange. Use HFE when the
+disk is intended for a compatible Gotek/HxC setup or real EPS hardware.
+Each plug-in instance owns an independent virtual drive. The mounted media
+name is shown above the four disk icons.
+
+## Presets, projects and multiple instances
+
+Saving the DAW project captures the full running machine state: CPU and OS
+state, instruments, sample RAM, effects, display, controller state and mounted
+disk. Reopening the project can therefore continue from the same point.
+
+This does not replace the disk `SAVE` command when a separate disk image is
+needed outside the DAW project. ROM and OS files are never embedded in the
+project state.
+
+## Known limitations
+
+- This is a **1.0 Beta** build for Apple Silicon macOS only.
+- VST3 only; no AU is shipped.
+- The bundle is ad-hoc signed but not Apple-notarized. macOS may require
+  explicit approval in Privacy & Security.
+- The original EPS has no MPE voice-expression model.
+- There is intentionally no modern host-side parameter editor or sample
+  browser. The original OS, panel workflow and EPS manual remain authoritative.
+- Copyrighted Ensoniq ROM, KPC and OS files must be supplied by the user.
+
+## Validation
+
+The 1.0 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
+strictly code-sign verified and ZIP-tested. Automated and original-OS
+regressions cover:
+
+- LINE and MIC sampling, threshold movement, recording and audible playback;
+- VFD fields and cursor segment masks;
+- ES5510 effects 10–13 and audio-bus routing;
+- Pitch Wheel, Mod Wheel, MIDI pressure transport and Note Off;
+- sequencer RECORD/PLAY/STOP and DAW-clock serialization;
+- IMG/HFE I/O, disk swapping and blank-disk creation;
+- snapshot compatibility, VST state and three independent instances;
+- absence of illegal 68000 instructions in the tested workflows.
+
+## Project and technical documentation
+
+This repository also contains the clean-room reverse-engineering and test
+foundation used to build the plug-in:
+
+- [VST3 architecture and build notes](docs/vst3-prototype.md)
+- [Hardware and original-OS bring-up](docs/bringup.md)
+- [Panel/KPC protocol](docs/panel-protocol.md)
+- [Parameter and ownership mapping](docs/parameter-mapping.md)
+- [KPC firmware reference](docs/kpc-reference.md)
+
+The disk tools can decode HFE v1, validate MFM sectors and CRCs, rebuild the
+logical 800 KiB EPS image, inspect the Ensoniq filesystem and create
+hardware-compatible HFE output. Development builds use the external
+[Musashi](https://github.com/kstenerud/Musashi) 68000 core and JUCE; no
+copyrighted Ensoniq binaries are stored in the source tree.
+
+## Credits and third-party work
+
+- [Musashi](https://github.com/kstenerud/Musashi), by Karl Stenerud, executes
+  the Motorola 68000 code. The VST3 build applies a small thread-local
+  adaptation at build time so independent plug-in instances can run safely.
+- [JUCE 8](https://github.com/juce-framework/JUCE), by Raw Material Software,
+  provides the VST3 wrapper, DAW audio/MIDI integration, plug-in state,
+  windowing and GUI framework.
+- [MAME](https://github.com/mamedev/mame) is **not** embedded as the emulator
+  framework. Its Ensoniq drivers and device implementations were valuable
+  hardware/protocol references. The standalone ES5510 execution core adapts
+  pipeline and instruction semantics from the BSD-3-Clause MAME ES5510 device
+  by Christian Brunschen.
+- The Ensoniq EPS-16 Plus service manual, legally supplied firmware/disk
+  images, real hardware photographs and captured OS/KPC traffic were used to
+  verify mappings and behavior. Those copyrighted Ensoniq files are never
+  distributed by this project.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and
+license details. The same notices are included in the downloadable package.
+
+## Build
+
+Place JUCE 8 at `work/deps/JUCE` and Musashi at `work/deps/Musashi`, then:
+
+```sh
+cmake -S . -B work/vst3-build \
+  -DEPS16_BUILD_VST3=ON \
+  -DEPS16_JUCE_DIR="$PWD/work/deps/JUCE" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64
+
+cmake --build work/vst3-build --target eps16_vst3_package -j 8
+ctest --test-dir work/vst3-build --output-on-failure
+```
+
+The package target creates a verified VST3 archive without building or
+shipping an Audio Unit.

@@ -43,6 +43,24 @@ int main(int argc, char **argv) {
     if (!dataEntry || !volume || !dataEntry->isEnabled() ||
         dataEntry->getMouseClickGrabsKeyboardFocus())
         return 1;
+    bool recordEnabled = false;
+    bool stopEnabled = false;
+    bool playEnabled = false;
+    bool playChordDocumented = false;
+    for (int index = 0; index < editor->getNumChildComponents(); ++index) {
+        auto *button = dynamic_cast<juce::TextButton *>(
+            editor->getChildComponent(index));
+        if (!button) continue;
+        if (button->getName() == "RECORD") recordEnabled = button->isEnabled();
+        if (button->getName() == "STOP / CONT") stopEnabled = button->isEnabled();
+        if (button->getName() == "PLAY") {
+            playEnabled = button->isEnabled();
+            playChordDocumented = button->getTooltip().contains("Shift-click");
+        }
+    }
+    if (!recordEnabled || !stopEnabled || !playEnabled ||
+        !playChordDocumented)
+        return 1;
     dataEntry->setValue(1023, juce::sendNotificationSync);
     if (dataEntry->getValue() != 1023) return 1;
     if (!editor->keyPressed(juce::KeyPress(juce::KeyPress::upKey)) ||
@@ -52,6 +70,7 @@ int main(int argc, char **argv) {
         editor->keyPressed(juce::KeyPress('A')))
         return 1;
     editor->focusLost(juce::Component::focusChangedDirectly);
+    dataEntry->setValue(512, juce::dontSendNotification);
 
     const auto snapshot = editor->createComponentSnapshot(editor->getLocalBounds());
     if (!snapshot.isValid() || snapshot.getWidth() != editor->getWidth() ||

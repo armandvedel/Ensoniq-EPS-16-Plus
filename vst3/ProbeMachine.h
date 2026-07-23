@@ -37,6 +37,7 @@ typedef struct {
 size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
                                        size_t capacity);
 void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2);
+size_t eps16_probe_machine_midi_rx_consumed(void);
 void eps16_probe_machine_panel_byte(uint8_t value);
 void eps16_probe_machine_analog(unsigned int channel, uint16_t value);
 void eps16_probe_machine_sampling_input_rate(double sample_rate);

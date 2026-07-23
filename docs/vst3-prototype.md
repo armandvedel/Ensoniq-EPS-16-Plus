@@ -28,9 +28,9 @@ the verified machine is mechanically extracted from `rom_probe.c`.
 - Sample-offset MIDI delivery and deterministic conversion of DAW sample time
   to the EPS 10 MHz CPU clock using an integer remainder accumulator.
 - Conventional channel-1 Pitch Bend and Mod Wheel (CC1) drive the original EPS
-  analog wheel channels, while Polyphonic Key Pressure (`A0`) becomes a per-key
-  KPC pressure update for an active key, coalesced to the finite physical
-  transport rate. Note Off cancels pending pressure before sending the release.
+  analog wheel channels. Polyphonic Key Pressure (`A0`) enters the original OS
+  through the emulated MC68681 MIDI receiver; it is never converted into a
+  second local KPC key-down, so it cannot delay the established Note Off path.
   The EPS has no MPE expression path, so
   member-channel pitch and Channel Pressure (`D0`) are ignored instead of being
   converted into artificial keyboard events. The original OS remains
@@ -50,8 +50,16 @@ the verified machine is mechanically extracted from `rom_probe.c`.
   converts that native stream to the DAW rate without sample-and-hold images.
   Its fixed 12,288-cycle latency is reported to the host.
 - Native original-layout panel surface. Buttons send raw KPC transitions only;
-  they do not implement modes, menus or display state. Unverified RECORD,
-  STOP/CONTINUE and PLAY mappings are visible but disabled.
+  they do not implement modes, menus or display state. RECORD,
+  STOP/CONTINUE and PLAY use the service-manual/KPC-verified raw matrix codes.
+  Shift-clicking PLAY emits overlapping RECORD-down, PLAY-down, PLAY-up and
+  RECORD-up transitions, matching the physical two-button gesture.
+- Ableton/VST3 tempo and transport are converted into sample-positioned MIDI
+  realtime bytes (`f8/fa/fb/fc`). They enter the original OS through the
+  emulated MC68681 channel-A receiver and its IRQ; the EPS CLOCK SOURCE setting
+  remains authoritative. Clock phase is carried across audio-block boundaries,
+  so a tick rounded onto the following block cannot be dropped. Existing note,
+  Pitch Wheel and Mod Wheel paths are unchanged.
 - While the plug-in editor has keyboard focus, the macOS cursor keys send the
   same raw press/release transitions as the four physical EPS arrow buttons.
   Losing focus releases every held arrow; other computer keys remain with the

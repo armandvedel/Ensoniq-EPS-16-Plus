@@ -69,6 +69,7 @@ typedef struct {
 } PanelTrace;
 
 typedef struct { uint64_t cycle; uint8_t value; } PanelWireByte;
+typedef struct { uint64_t cycle; uint8_t value; } MidiWireByte;
 
 typedef struct {
     long long cycle;
@@ -169,6 +170,12 @@ typedef struct {
     uint64_t duart_tx_b_ready_cycle;
     uint8_t midi_tx[256];
     size_t midi_tx_count;
+    uint8_t midi_rx[256];
+    size_t midi_rx_read, midi_rx_write, midi_rx_count, midi_rx_consumed;
+    MidiWireByte midi_wire[256];
+    size_t midi_wire_read, midi_wire_write, midi_wire_count;
+    uint64_t midi_wire_tail_cycle;
+    int duart_rx_a_enabled;
     uint16_t analog_values[8];
     unsigned int analog_reads[8];
     int duart_timer_pending, duart_timer_running;
@@ -362,6 +369,17 @@ static void rom_probe_state_defaults(RomProbeState *state) {
 #define duart_tx_b_ready_cycle RP(duart_tx_b_ready_cycle)
 #define midi_tx RP(midi_tx)
 #define midi_tx_count RP(midi_tx_count)
+#define midi_rx RP(midi_rx)
+#define midi_rx_read RP(midi_rx_read)
+#define midi_rx_write RP(midi_rx_write)
+#define midi_rx_count RP(midi_rx_count)
+#define midi_rx_consumed RP(midi_rx_consumed)
+#define midi_wire RP(midi_wire)
+#define midi_wire_read RP(midi_wire_read)
+#define midi_wire_write RP(midi_wire_write)
+#define midi_wire_count RP(midi_wire_count)
+#define midi_wire_tail_cycle RP(midi_wire_tail_cycle)
+#define duart_rx_a_enabled RP(duart_rx_a_enabled)
 #define analog_values RP(analog_values)
 #define analog_reads RP(analog_reads)
 #define duart_timer_pending RP(duart_timer_pending)
@@ -1315,6 +1333,35 @@ static void panel_service_wire(uint64_t cycle) {
     }
 }
 
+static int midi_schedule_at(uint8_t value, uint64_t cycle) {
+    if (midi_wire_count == sizeof(midi_wire) / sizeof(midi_wire[0])) return 0;
+    uint64_t arrival = cycle + MIDI_BYTE_CYCLES;
+    if (midi_wire_count && midi_wire_tail_cycle >= arrival)
+        arrival = midi_wire_tail_cycle + MIDI_BYTE_CYCLES;
+    midi_wire[midi_wire_write] = (MidiWireByte){arrival, value};
+    midi_wire_write =
+        (midi_wire_write + 1) % (sizeof(midi_wire) / sizeof(midi_wire[0]));
+    ++midi_wire_count;
+    midi_wire_tail_cycle = arrival;
+    return 1;
+}
+
+static void midi_service_wire(uint64_t cycle) {
+    while (midi_wire_count && midi_wire[midi_wire_read].cycle <= cycle) {
+        const uint8_t value = midi_wire[midi_wire_read].value;
+        midi_wire_read =
+            (midi_wire_read + 1) % (sizeof(midi_wire) / sizeof(midi_wire[0]));
+        --midi_wire_count;
+        if (duart_rx_a_enabled &&
+            midi_rx_count < sizeof(midi_rx) / sizeof(midi_rx[0])) {
+            midi_rx[midi_rx_write] = value;
+            midi_rx_write =
+                (midi_rx_write + 1) % (sizeof(midi_rx) / sizeof(midi_rx[0]));
+            ++midi_rx_count;
+        }
+    }
+}
+
 static uint64_t duart_timer_period_cycles(void) {
     unsigned int count = ((unsigned int)duart_registers[6] << 8) | duart_registers[7];
     if (!count) count = 1;
@@ -1333,6 +1380,7 @@ static void duart_service_time(uint64_t cycle) {
     if (!duart_tx_a_ready && cycle >= duart_tx_a_ready_cycle) duart_tx_a_ready = 1;
     if (!duart_tx_b_ready && cycle >= duart_tx_b_ready_cycle) duart_tx_b_ready = 1;
     panel_service_wire(cycle);
+    midi_service_wire(cycle);
     if (duart_timer_running && cycle >= duart_timer_next_cycle) {
         duart_timer_pending = 1;
         uint64_t period = duart_timer_period_cycles();
@@ -1365,6 +1413,7 @@ static unsigned int panel_dequeue(void) {
 
 static unsigned int duart_interrupt_status(void) {
     return (duart_tx_a_enabled && duart_tx_a_ready ? 0x01 : 0x00) |
+           (midi_rx_count ? 0x02 : 0x00) |
            (duart_timer_pending ? 0x08 : 0x00) |
            (duart_tx_b_enabled && duart_tx_b_ready ? 0x10 : 0x00) |
            (panel_rx_count ? 0x20 : 0x00);
@@ -1393,7 +1442,18 @@ static unsigned int duart_read(unsigned int address) {
     unsigned int reg = ((address - DUART_BASE) >> 1) & 15;
     if (reg == 5) return duart_interrupt_status();
     if (reg == 1)
-        return duart_tx_a_enabled && duart_tx_a_ready ? 0x0c : 0x00; /* SRA */
+        return (duart_tx_a_enabled && duart_tx_a_ready ? 0x0c : 0x00) |
+               (midi_rx_count ? 0x01 : 0x00); /* SRA */
+    if (reg == 3) { /* RHRA: external MIDI input */
+        if (!midi_rx_count) return 0;
+        const unsigned int value = midi_rx[midi_rx_read];
+        midi_rx_read =
+            (midi_rx_read + 1) % (sizeof(midi_rx) / sizeof(midi_rx[0]));
+        --midi_rx_count;
+        ++midi_rx_consumed;
+        duart_refresh_irq_line();
+        return value;
+    }
     if (reg == 9)
         return (duart_tx_b_enabled && duart_tx_b_ready ? 0x0c : 0x00) |
                (panel_rx_count ? 0x01 : 0x00); /* SRB */
@@ -1435,6 +1495,11 @@ static void duart_write(unsigned int address, unsigned int value) {
         m68k_end_timeslice();
     }
     if (reg == 2) { /* CRA: channel-A receiver/transmitter commands */
+        if (value & 0x01) duart_rx_a_enabled = 1;
+        if (value & 0x02) duart_rx_a_enabled = 0;
+        if ((value & 0x70) == 0x20) {
+            midi_rx_read = midi_rx_write = midi_rx_count = 0;
+        }
         if (value & 0x04) duart_tx_a_enabled = 1;
         if (value & 0x08) duart_tx_a_enabled = 0;
         duart_refresh_irq_line();

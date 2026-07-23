@@ -529,14 +529,29 @@ size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
 
 void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2) {
     if (!plugin_initialized) return;
+    if (status >= 0xf8) {
+        midi_schedule_at(status, bus_cycle_now());
+        return;
+    }
     const unsigned int kind = status & 0xf0;
     const unsigned int channel = status & 0x0f;
     if (kind == 0x90 && data2)
         live_note(data1, data2, 1);
     else if (kind == 0x80 || (kind == 0x90 && !data2))
         live_note(data1, data2, 0);
-    else if ((kind == 0xe0 || (kind == 0xb0 && data1 == 1)) && channel == 0)
+    else if (kind == 0xa0 && channel == 0 &&
+             midi_wire_count <=
+                 sizeof(midi_wire) / sizeof(midi_wire[0]) - 3) {
+        midi_schedule_at(status, bus_cycle_now());
+        midi_schedule_at(data1, bus_cycle_now());
+        midi_schedule_at(data2, bus_cycle_now());
+    } else if ((kind == 0xe0 || (kind == 0xb0 && data1 == 1)) &&
+               channel == 0)
         live_performance_midi(status, data1, data2);
+}
+
+size_t eps16_probe_machine_midi_rx_consumed(void) {
+    return plugin_initialized ? midi_rx_consumed : 0;
 }
 
 void eps16_probe_machine_panel_byte(uint8_t value) {
@@ -879,6 +894,9 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     plugin_audio_queue_read = 0;
     plugin_audio_queue_write = 0;
     plugin_last_keyon_frequency = 0;
+    midi_rx_read = midi_rx_write = midi_rx_count = 0;
+    midi_wire_read = midi_wire_write = midi_wire_count = 0;
+    midi_wire_tail_cycle = 0;
     if (error && error_size) error[0] = '\0';
     return reader.current == reader.end;
 }

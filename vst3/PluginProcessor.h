@@ -82,6 +82,7 @@ private:
     static constexpr std::size_t maximumMidiEvents = 1024;
     eps16::vst3::ProbeMachineSink machineSink;
     eps16::vst3::EmulatorBridge bridge{machineSink};
+    eps16::vst3::HostMidiClock hostMidiClock;
     std::array<eps16::vst3::MidiEvent, maximumMidiEvents> midiEvents{};
     juce::ValueTree state{"EPS16PlusPrototype"};
     juce::MemoryBlock pendingMachineState;

@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PanelEditor.h"
 
+#include <algorithm>
 #include <dlfcn.h>
 
 namespace {
@@ -60,6 +61,7 @@ void Eps16PlusProcessor::prepareToPlay(double sampleRate, int) {
                           getResourcePath(kpcPathKey).toStdString(),
                           getResourcePath(osDiskPathKey).toStdString());
     bridge.prepare(sampleRate);
+    hostMidiClock.prepare(sampleRate);
     if (machineSink.isReady() && pendingMachineState.getSize() > 0 &&
         machineSink.restoreState(pendingMachineState.getData(),
                                  pendingMachineState.getSize())) {
@@ -85,6 +87,16 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     const float *inputLeft = samplingInput.getReadPointer(0);
     const float *inputRight = samplingInput.getReadPointer(1);
     std::size_t eventCount = 0;
+    if (const auto *playHead = getPlayHead()) {
+        if (const auto position = playHead->getPosition()) {
+            const auto bpm = position->getBpm();
+            const auto ppq = position->getPpqPosition();
+            if (bpm && ppq)
+                eventCount += hostMidiClock.generate(
+                    true, position->getIsPlaying(), *bpm, *ppq, samples,
+                    midiEvents.data(), midiEvents.size());
+        }
+    }
     for (const auto metadata : midi) {
         if (eventCount == midiEvents.size()) break;
         const auto message = metadata.getMessage();
@@ -96,6 +108,10 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
             static_cast<std::uint8_t>(length > 1 ? raw[1] : 0),
             static_cast<std::uint8_t>(length > 2 ? raw[2] : 0)};
     }
+    std::stable_sort(midiEvents.begin(), midiEvents.begin() + eventCount,
+                     [](const auto &left, const auto &right) {
+                         return left.sampleOffset < right.sampleOffset;
+                     });
 
     bridge.process(inputLeft, inputRight, mainOutput.getWritePointer(0),
                    mainOutput.getWritePointer(1), samples, midiEvents.data(),
@@ -125,6 +141,7 @@ bool Eps16PlusProcessor::restoreMachineSnapshot(const void *data,
     const juce::ScopedLock lock(getCallbackLock());
     if (!machineSink.restoreState(data, size)) return false;
     bridge.resetTimeline();
+    hostMidiClock.reset();
     return true;
 }
 
@@ -169,6 +186,7 @@ void Eps16PlusProcessor::setStateInformation(const void *data, int size) {
     pendingMachineState = restoredMachine;
     if (machineSink.isReady() && pendingMachineState.getSize() > 0) {
         bridge.resetTimeline();
+        hostMidiClock.reset();
         if (machineSink.restoreState(pendingMachineState.getData(),
                                      pendingMachineState.getSize()))
             pendingMachineState.reset();

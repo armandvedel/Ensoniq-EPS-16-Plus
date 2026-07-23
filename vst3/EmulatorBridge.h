@@ -61,6 +61,22 @@ private:
     std::uint64_t totalCycles{};
 };
 
+class HostMidiClock {
+public:
+    bool prepare(double sampleRate);
+    void reset();
+    std::size_t generate(bool positionValid, bool playing, double bpm,
+                         double ppqPosition, int samples, MidiEvent *events,
+                         std::size_t capacity);
+
+private:
+    double sampleRate{};
+    double expectedPpq{};
+    std::int64_t nextClockTick{};
+    bool transportKnown{};
+    bool wasPlaying{};
+};
+
 class EmulatorBridge {
 public:
     static constexpr std::size_t controlQueueCapacity = 512;

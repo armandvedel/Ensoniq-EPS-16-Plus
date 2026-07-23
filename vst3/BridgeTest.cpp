@@ -3,6 +3,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <vector>
 
@@ -74,10 +75,11 @@ int main() {
     const MidiEvent midi[] = {
         {0, 0x90, 60, 100}, {4800, 0xa0, 60, 50},
         {9600, 0xd0, 64, 0}, {14400, 0xb0, 1, 96},
-        {19200, 0xe0, 0, 64}, {24000, 0x80, 60, 0}
+        {19200, 0xe0, 0, 64}, {24000, 0x80, 60, 0},
+        {28800, 0xf8, 0, 0}
     };
     bridge.process(inputLeft.data(), inputRight.data(), outputLeft.data(),
-                   outputRight.data(), frames, midi, 6);
+                   outputRight.data(), frames, midi, 7);
 
     assert(bridge.cpuCycles() == kCpuClockHz);
     assert(sink.lastRunCycle == kCpuClockHz);
@@ -94,7 +96,7 @@ int main() {
     assert(sink.analogMessages[0].value == 128);
     assert(sink.analogMessages[1].value == 384);
     assert(sink.analogMessages[2].value == 715);
-    assert(sink.midiMessages.size() == 6);
+    assert(sink.midiMessages.size() == 7);
     assert(sink.midiMessages[0].cycle == 0);
     assert(sink.midiMessages[1].value == 0xa0 &&
            sink.midiMessages[1].cycle == 1000000);
@@ -106,6 +108,8 @@ int main() {
            sink.midiMessages[4].cycle == 4000000);
     assert(sink.midiMessages[5].value == 0x80 &&
            sink.midiMessages[5].cycle == 5000000);
+    assert(sink.midiMessages[6].value == 0xf8 &&
+           sink.midiMessages[6].cycle == 6000000);
     assert(sink.lastMidiData1 == 60 && sink.lastMidiData2 == 0);
     assert(bridge.droppedControls() == 0);
 
@@ -113,6 +117,79 @@ int main() {
     assert(clock.prepare(44100.0));
     for (int i = 0; i < 44100; ++i) clock.advanceOneSample();
     assert(clock.cycles() == kCpuClockHz);
+
+    HostMidiClock hostClock;
+    assert(hostClock.prepare(48000.0));
+    std::array<MidiEvent, 64> clockEvents{};
+    auto clockCount = hostClock.generate(true, true, 120.0, 0.0, 48000,
+                                         clockEvents.data(),
+                                         clockEvents.size());
+    assert(clockCount == 49);
+    assert(clockEvents[0].status == 0xfa &&
+           clockEvents[0].sampleOffset == 0);
+    for (std::size_t index = 1; index < clockCount; ++index) {
+        assert(clockEvents[index].status == 0xf8);
+        assert(clockEvents[index].sampleOffset ==
+               static_cast<int>((index - 1) * 1000));
+    }
+    clockCount = hostClock.generate(true, false, 120.0, 2.0, 128,
+                                    clockEvents.data(), clockEvents.size());
+    assert(clockCount == 1 && clockEvents[0].status == 0xfc);
+    clockCount = hostClock.generate(true, true, 120.0, 2.0, 1000,
+                                    clockEvents.data(), clockEvents.size());
+    assert(clockCount == 2 && clockEvents[0].status == 0xfb &&
+           clockEvents[1].status == 0xf8);
+
+    /* A tick that rounds to the first sample of the next audio block must be
+       carried across that boundary. Recomputing the first tick independently
+       for every block used to lose such ticks and made the EPS drift behind
+       the DAW at ordinary non-integral tempos and buffer sizes. */
+    HostMidiClock boundaryClock;
+    constexpr double boundaryRate = 44100.0;
+    constexpr double boundaryBpm = 123.456;
+    constexpr int boundaryBlock = 128;
+    constexpr std::int64_t boundarySamples =
+        static_cast<std::int64_t>(boundaryRate * 60.0);
+    if (!boundaryClock.prepare(boundaryRate)) return 9;
+    std::int64_t clockTicks = 0;
+    std::int64_t previousClockSample = -1;
+    for (std::int64_t blockStart = 0; blockStart < boundarySamples;
+         blockStart += boundaryBlock) {
+        const int blockSamples = static_cast<int>(std::min<std::int64_t>(
+            boundaryBlock, boundarySamples - blockStart));
+        const double blockPpq =
+            static_cast<double>(blockStart) * boundaryBpm /
+            (60.0 * boundaryRate);
+        const auto count = boundaryClock.generate(
+            true, true, boundaryBpm, blockPpq, blockSamples,
+            clockEvents.data(), clockEvents.size());
+        for (std::size_t index = 0; index < count; ++index) {
+            if (clockEvents[index].status != 0xf8) continue;
+            const auto absoluteSample =
+                blockStart + clockEvents[index].sampleOffset;
+            const double idealSample =
+                static_cast<double>(clockTicks) * boundaryRate * 60.0 /
+                (boundaryBpm * 24.0);
+            if (absoluteSample <= previousClockSample) return 10;
+            if (std::abs(static_cast<double>(absoluteSample) -
+                         idealSample) > 0.500001)
+                return 11;
+            previousClockSample = absoluteSample;
+            ++clockTicks;
+        }
+    }
+    std::int64_t expectedClockTicks = 0;
+    while (std::floor(
+               static_cast<double>(expectedClockTicks) * boundaryRate * 60.0 /
+                   (boundaryBpm * 24.0) +
+               0.5) < static_cast<double>(boundarySamples))
+        ++expectedClockTicks;
+    if (clockTicks != expectedClockTicks) {
+        std::fprintf(stderr, "clock ticks: actual=%lld expected=%lld\n",
+                     static_cast<long long>(clockTicks),
+                     static_cast<long long>(expectedClockTicks));
+        return 12;
+    }
 
     CaptureSink partitionedSink;
     EmulatorBridge partitionedBridge(partitionedSink);

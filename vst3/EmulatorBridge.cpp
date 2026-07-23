@@ -21,6 +21,74 @@ std::uint64_t DawClock::advanceOneSample() {
     return totalCycles;
 }
 
+bool HostMidiClock::prepare(double rate) {
+    if (!std::isfinite(rate) || rate < 8000.0 || rate > 768000.0)
+        return false;
+    sampleRate = rate;
+    reset();
+    return true;
+}
+
+void HostMidiClock::reset() {
+    expectedPpq = 0.0;
+    nextClockTick = 0;
+    transportKnown = false;
+    wasPlaying = false;
+}
+
+std::size_t HostMidiClock::generate(bool positionValid, bool playing,
+                                    double bpm, double ppqPosition,
+                                    int samples, MidiEvent *events,
+                                    std::size_t capacity) {
+    if (!positionValid || !events || !capacity || samples <= 0 ||
+        !std::isfinite(bpm) || bpm <= 0.0 || !std::isfinite(ppqPosition) ||
+        sampleRate <= 0.0)
+        return 0;
+
+    std::size_t count = 0;
+    const double ppqPerSample = bpm / (60.0 * sampleRate);
+    const double endPpq = ppqPosition + ppqPerSample * samples;
+    const double continuityTolerance = std::max(1.0e-7, ppqPerSample * 2.0);
+    const bool discontinuity = transportKnown && wasPlaying && playing &&
+        std::abs(ppqPosition - expectedPpq) > continuityTolerance;
+
+    auto append = [&](std::uint8_t status, int sampleOffset) {
+        if (count < capacity)
+            events[count++] = {sampleOffset, status, 0, 0};
+    };
+
+    if (transportKnown && wasPlaying && (!playing || discontinuity))
+        append(0xfc, 0);
+    if (playing && (!transportKnown || !wasPlaying || discontinuity)) {
+        const bool continueFromStop = transportKnown && !wasPlaying &&
+            std::abs(ppqPosition - expectedPpq) <= continuityTolerance;
+        append(continueFromStop ? 0xfb : 0xfa, 0);
+        if (!continueFromStop)
+            nextClockTick = static_cast<std::int64_t>(
+                std::ceil(ppqPosition * 24.0 - 1.0e-9));
+    }
+
+    if (playing) {
+        for (;;) {
+            const double tickPpq =
+                static_cast<double>(nextClockTick) / 24.0;
+            const double exactOffset =
+                (tickPpq - ppqPosition) / ppqPerSample;
+            const int offset = static_cast<int>(
+                std::floor(exactOffset + 0.5));
+            if (offset >= samples) break;
+            if (count == capacity) break;
+            append(0xf8, std::max(0, offset));
+            ++nextClockTick;
+        }
+    }
+
+    transportKnown = true;
+    wasPlaying = playing;
+    expectedPpq = playing ? endPpq : ppqPosition;
+    return count;
+}
+
 bool EmulatorBridge::prepare(double sampleRate) {
     if (!clock.prepare(sampleRate)) return false;
     controlRead.store(0, std::memory_order_relaxed);
@@ -108,7 +176,8 @@ void EmulatorBridge::dispatchControls(std::uint64_t cycle) {
 
 void EmulatorBridge::dispatchMidi(const MidiEvent &event, std::uint64_t cycle) {
     const auto type = static_cast<std::uint8_t>(event.status & 0xf0);
-    if (type == 0x80 || type == 0x90 || type == 0xa0 || type == 0xb0 ||
+    if (event.status >= 0xf8 ||
+        type == 0x80 || type == 0x90 || type == 0xa0 || type == 0xb0 ||
         type == 0xc0 || type == 0xd0 || type == 0xe0)
         sink.midi(event.status, event.data1, event.data2, cycle);
 }

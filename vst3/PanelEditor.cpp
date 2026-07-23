@@ -177,6 +177,109 @@ void drawVfdCell(juce::Graphics &graphics, juce::Rectangle<float> cell,
 }
 }
 
+void Eps16PanelEditor::EpsFaderLookAndFeel::drawLinearSlider(
+    juce::Graphics &graphics, int x, int y, int width, int height,
+    float sliderPosition, float minimumSliderPosition,
+    float maximumSliderPosition, juce::Slider::SliderStyle style,
+    juce::Slider &slider) {
+    if (style != juce::Slider::LinearVertical) {
+        juce::LookAndFeel_V4::drawLinearSlider(
+            graphics, x, y, width, height, sliderPosition,
+            minimumSliderPosition, maximumSliderPosition, style, slider);
+        return;
+    }
+
+    const float scale = juce::jmax(0.55f, (float)height / 198.0f);
+    const auto originalOuter =
+        juce::Rectangle<float>((float)x, (float)y, (float)width,
+                               (float)height)
+            .reduced(13.0f * scale, 2.0f * scale);
+    auto outer = originalOuter;
+    /* JUCE shortens the painting area to leave room for the thumb.  On the
+       EPS the recessed fader track itself reaches the display's upper edge.
+       Extend only that recess upward; its component and lower edge stay put. */
+    outer.setTop(2.0f * scale);
+    const float outerRadius = 3.0f * scale;
+
+    graphics.setColour(juce::Colour{0xff444744});
+    graphics.fillRoundedRectangle(outer, outerRadius);
+    graphics.setColour(juce::Colour{0xff171817});
+    graphics.drawRoundedRectangle(outer, outerRadius, 1.0f * scale);
+
+    auto cavity = outer.reduced(3.0f * scale);
+    graphics.setGradientFill(juce::ColourGradient{
+        juce::Colour{0xff151615}, cavity.getTopLeft(),
+        juce::Colour{0xff343634}, cavity.getBottomRight(), false});
+    graphics.fillRoundedRectangle(cavity, 1.5f * scale);
+    graphics.setColour(juce::Colour{0xff0b0c0b});
+    graphics.drawRoundedRectangle(cavity, 1.5f * scale, 1.0f * scale);
+
+    const float slotWidth = juce::jmax(5.0f * scale, cavity.getWidth() * 0.17f);
+    auto slot = juce::Rectangle<float>(
+        cavity.getCentreX() - slotWidth * 0.5f,
+        cavity.getY() + 18.0f * scale, slotWidth,
+        cavity.getHeight() - 36.0f * scale);
+    graphics.setGradientFill(juce::ColourGradient{
+        juce::Colour{0xff080908}, slot.getX(), slot.getCentreY(),
+        juce::Colour{0xff272927}, slot.getRight(), slot.getCentreY(), false});
+    graphics.fillRect(slot);
+    graphics.setColour(juce::Colour{0xff050605});
+    graphics.drawRect(slot, 0.9f * scale);
+
+    const float originalCavityHeight =
+        originalOuter.reduced(3.0f * scale).getHeight();
+    const float thumbHeight =
+        juce::jmax(33.0f * scale, originalCavityHeight * 0.205f);
+    const float thumbWidth = cavity.getWidth() - 7.0f * scale;
+    const float valueProportion =
+        (float)slider.valueToProportionOfLength(slider.getValue());
+    const float extendedSliderPosition = juce::jmap(
+        valueProportion, cavity.getBottom() - thumbHeight * 0.5f,
+        cavity.getY() + thumbHeight * 0.5f);
+    const float thumbY = juce::jlimit(
+        cavity.getY(), cavity.getBottom() - thumbHeight,
+        extendedSliderPosition - thumbHeight * 0.5f);
+    auto thumb = juce::Rectangle<float>(
+        cavity.getCentreX() - thumbWidth * 0.5f, thumbY,
+        thumbWidth, thumbHeight);
+
+    graphics.setColour(juce::Colour{0x52000000});
+    graphics.fillRoundedRectangle(
+        thumb.translated(1.7f * scale, 2.2f * scale), 1.8f * scale);
+    graphics.setGradientFill(juce::ColourGradient{
+        juce::Colour{0xff555855}, thumb.getX(), thumb.getY(),
+        juce::Colour{0xff181a18}, thumb.getRight(), thumb.getBottom(), false});
+    graphics.fillRoundedRectangle(thumb, 1.6f * scale);
+    graphics.setColour(juce::Colour{0xff0c0d0c});
+    graphics.drawRoundedRectangle(thumb, 1.6f * scale, 1.0f * scale);
+
+    const float smoothHeight = thumbHeight * 0.42f;
+    graphics.setGradientFill(juce::ColourGradient{
+        juce::Colour{0xff656865}, thumb.getX(), thumb.getY(),
+        juce::Colour{0xff303230}, thumb.getX(),
+        thumb.getY() + smoothHeight, false});
+    graphics.fillRect(thumb.getX() + 1.2f * scale,
+                      thumb.getY() + 1.2f * scale,
+                      thumb.getWidth() - 2.4f * scale,
+                      smoothHeight - 1.2f * scale);
+
+    const float gripTop = thumb.getY() + smoothHeight;
+    const float gripBottom = thumb.getBottom() - 2.0f * scale;
+    constexpr int ridgeCount = 6;
+    const float ridgeStep = (gripBottom - gripTop) / ridgeCount;
+    for (int ridge = 0; ridge < ridgeCount; ++ridge) {
+        const float ridgeY = gripTop + ridgeStep * (float)ridge;
+        const float darkHeight = juce::jmax(1.2f * scale, ridgeStep * 0.44f);
+        graphics.setColour(juce::Colour{0xff111211});
+        graphics.fillRect(thumb.getX() + 1.5f * scale, ridgeY,
+                          thumb.getWidth() - 3.0f * scale, darkHeight);
+        graphics.setColour(juce::Colour{0xff747774});
+        graphics.fillRect(thumb.getX() + 2.2f * scale, ridgeY + darkHeight,
+                          thumb.getWidth() - 4.4f * scale,
+                          juce::jmax(0.65f * scale, ridgeStep * 0.18f));
+    }
+}
+
 void Eps16PanelEditor::VfdLabel::setCursorSegmentMask(std::uint32_t mask) {
     mask &= 0x3fffffU;
     if (cursorSegmentMask == mask) return;
@@ -303,10 +406,21 @@ Eps16PanelEditor::PanelButton::PanelButton(Eps16PlusProcessor &processorToUse,
     if (!mappingKnown) setTooltip("Wire mapping is not verified yet");
 }
 
+void Eps16PanelEditor::PanelButton::setShiftChordCode(std::uint8_t rawCode) {
+    shiftChordCode = rawCode;
+}
+
 void Eps16PanelEditor::PanelButton::mouseDown(const juce::MouseEvent &event) {
     if (auto *parent = getParentComponent()) parent->grabKeyboardFocus();
     if (isEnabled() && !pressed) {
+        if (shiftChordCode != 0xff && event.mods.isShiftDown())
+            shiftChordPressed =
+                processor.enqueuePanelTransition(shiftChordCode, true);
         pressed = processor.enqueuePanelTransition(code, true);
+        if (!pressed && shiftChordPressed) {
+            processor.enqueuePanelTransition(shiftChordCode, false);
+            shiftChordPressed = false;
+        }
     }
     TextButton::mouseDown(event);
 }
@@ -315,6 +429,10 @@ void Eps16PanelEditor::PanelButton::releaseIfNeeded() {
     if (pressed) {
         processor.enqueuePanelTransition(code, false);
         pressed = false;
+    }
+    if (shiftChordPressed) {
+        processor.enqueuePanelTransition(shiftChordCode, false);
+        shiftChordPressed = false;
     }
 }
 
@@ -476,8 +594,8 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     addAndMakeVisible(saveDiskButton);
 
     diskName.setComponentID("mounted-disk-name");
-    diskName.setJustificationType(juce::Justification::centredRight);
-    diskName.setMinimumHorizontalScale(0.55f);
+    diskName.setJustificationType(juce::Justification::centredLeft);
+    diskName.setMinimumHorizontalScale(0.65f);
     diskName.setColour(juce::Label::textColourId,
                        rackLabelColour.withAlpha(0.86f));
     diskName.setInterceptsMouseClicks(false, false);
@@ -516,9 +634,11 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     rightButton = &addPanelButton("RIGHT", 0x11);
     cancelButton = &addPanelButton("NO / CANCEL", 0x21);
     enterButton = &addPanelButton("YES / ENTER", 0x23);
-    sequencerButtons[0] = &addPanelButton("RECORD", 0, false);
-    sequencerButtons[1] = &addPanelButton("STOP / CONT", 0, false);
-    sequencerButtons[2] = &addPanelButton("PLAY", 0, false);
+    sequencerButtons[0] = &addPanelButton("RECORD", 0x03);
+    sequencerButtons[1] = &addPanelButton("STOP / CONT", 0x17);
+    sequencerButtons[2] = &addPanelButton("PLAY", 0x1d);
+    sequencerButtons[2]->setShiftChordCode(0x03);
+    sequencerButtons[2]->setTooltip("PLAY (Shift-click: RECORD + PLAY)");
 
     auto configureFader = [this](juce::Slider &slider, const juce::String &name) {
         slider.setName(name);
@@ -530,6 +650,7 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
            steal the editor focus because the physical arrow keys belong to
            the panel rather than to the JUCE slider. */
         slider.setMouseClickGrabsKeyboardFocus(false);
+        slider.setLookAndFeel(&faderLookAndFeel);
         slider.setRange(0, 1023, 1);
         addAndMakeVisible(slider);
     };
@@ -557,6 +678,8 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
 
 Eps16PanelEditor::~Eps16PanelEditor() {
     releaseArrowKeys();
+    masterVolume.setLookAndFeel(nullptr);
+    dataEntry.setLookAndFeel(nullptr);
 }
 
 void Eps16PanelEditor::openSaveDiskDialog(bool hfeFormat) {
@@ -841,26 +964,47 @@ void Eps16PanelEditor::paint(juce::Graphics &graphics) {
     static const char *sequenceLabels[3] = {"RECORD", "STOP / CONT", "PLAY"};
     for (std::size_t index = 0; index < sequencerButtons.size(); ++index)
         above(sequencerButtons[index], sequenceLabels[index], 12);
-    graphics.setFont(9.0f * scale);
-    graphics.drawText("SEQUENCER", sequencerButtons.front()->getX(),
-                      sequencerButtons.front()->getBottom() +
-                          juce::roundToInt(24 * scale),
-                      sequencerButtons.back()->getRight() -
-                          sequencerButtons.front()->getX(),
-                      juce::roundToInt(14 * scale),
-                      juce::Justification::centred);
 
-    graphics.setFont(17.0f * scale);
-    above(upButton, juce::CharPointer_UTF8("\xe2\x96\xb3"), 20);
-    below(downButton, juce::CharPointer_UTF8("\xe2\x96\xbd"), 20);
-    graphics.drawText(juce::CharPointer_UTF8("\xe2\x97\x81"),
-                      leftButton->getX() - juce::roundToInt(23 * scale),
-                      leftButton->getY(), juce::roundToInt(20 * scale),
-                      leftButton->getHeight(), juce::Justification::centred);
-    graphics.drawText(juce::CharPointer_UTF8("\xe2\x96\xb7"),
-                      rightButton->getRight() + juce::roundToInt(3 * scale),
-                      rightButton->getY(), juce::roundToInt(20 * scale),
-                      rightButton->getHeight(), juce::Justification::centred);
+    auto drawNavigationTriangle =
+        [&graphics, scale](juce::Point<float> centre, float rotation) {
+            const float radius = 8.0f * scale;
+            juce::Path triangle;
+            for (int vertex = 0; vertex < 3; ++vertex) {
+                const float angle =
+                    rotation +
+                    juce::MathConstants<float>::twoPi * (float)vertex / 3.0f;
+                const auto point =
+                    centre + juce::Point<float>(std::cos(angle),
+                                                std::sin(angle)) *
+                                 radius;
+                if (vertex == 0)
+                    triangle.startNewSubPath(point);
+                else
+                    triangle.lineTo(point);
+            }
+            triangle.closeSubPath();
+            graphics.strokePath(
+                triangle,
+                juce::PathStrokeType(1.1f * scale,
+                                     juce::PathStrokeType::curved,
+                                     juce::PathStrokeType::rounded));
+        };
+    drawNavigationTriangle(
+        {(float)upButton->getBounds().getCentreX(),
+         (float)upButton->getY() - 10.0f * scale},
+        -juce::MathConstants<float>::halfPi);
+    drawNavigationTriangle(
+        {(float)downButton->getBounds().getCentreX(),
+         (float)downButton->getBottom() + 10.0f * scale},
+        juce::MathConstants<float>::halfPi);
+    drawNavigationTriangle(
+        {(float)leftButton->getX() - 13.0f * scale,
+         (float)leftButton->getBounds().getCentreY()},
+        juce::MathConstants<float>::pi);
+    drawNavigationTriangle(
+        {(float)rightButton->getRight() + 13.0f * scale,
+         (float)rightButton->getBounds().getCentreY()},
+        0.0f);
 
     graphics.setFont(8.0f * scale);
     above(cancelButton, "NO", 13);
@@ -879,28 +1023,44 @@ void Eps16PanelEditor::paint(juce::Graphics &graphics) {
             juce::roundToInt((float)width * scale),
             juce::roundToInt((float)height * scale));
     };
+    auto drawLegendLines = [&graphics, &baseRect](int x, int width) {
+        if (width <= 0) return;
+        graphics.fillRect(baseRect(x, 248, width, 2));
+        graphics.fillRect(baseRect(x, 252, width, 2));
+    };
+
     graphics.setColour(accentColour);
-    for (const auto line : {baseRect(18, 249, 92, 2),
-                            baseRect(130, 249, 135, 2),
-                            baseRect(281, 249, 175, 2),
-                            baseRect(475, 249, 168, 2),
-                            baseRect(690, 249, 444, 2),
-                            baseRect(1170, 249, 162, 2)})
-        graphics.fillRect(line);
+    drawLegendLines(0, 41);
+    drawLegendLines(89, 52);
+    drawLegendLines(181, 157);
+    drawLegendLines(376, 149);
+    drawLegendLines(595, 121);
+
+    int trackLineX = 716;
+    for (int index = 0; index < 8; ++index) {
+        const int numberCentre = 722 + index * 55;
+        drawLegendLines(trackLineX, numberCentre - 6 - trackLineX);
+        trackLineX = numberCentre + 6;
+    }
+    drawLegendLines(trackLineX, 1216 - trackLineX);
+    drawLegendLines(1286, 64);
+
     graphics.setColour(rackLabelColour);
     graphics.setFont(9.0f * scale);
-    graphics.drawText("VOLUME", baseRect(25, 251, 78, 18),
+    graphics.drawText("VOLUME", baseRect(38, 240, 54, 20),
                       juce::Justification::centred);
-    graphics.drawText("MODE", baseRect(145, 251, 70, 18),
+    graphics.drawText("MODE", baseRect(133, 240, 56, 20),
                       juce::Justification::centred);
-    graphics.drawText("PAGE", baseRect(322, 251, 76, 18),
+    graphics.drawText("PAGE", baseRect(331, 240, 51, 20),
                       juce::Justification::centred);
-    graphics.drawText("DATA ENTRY", baseRect(505, 251, 110, 18),
+    graphics.drawText("DATA ENTRY", baseRect(513, 240, 93, 20),
                       juce::Justification::centred);
     for (int index = 0; index < 8; ++index)
         graphics.drawText(juce::String(index + 1),
-                          baseRect(706 + index * 55, 251, 28, 18),
+                          baseRect(712 + index * 55, 240, 20, 20),
                           juce::Justification::centred);
+    graphics.drawText("SEQUENCER", baseRect(1207, 240, 88, 20),
+                      juce::Justification::centred);
 }
 
 void Eps16PanelEditor::resized() {
@@ -930,9 +1090,9 @@ void Eps16PanelEditor::resized() {
     for (std::size_t index = 0; index < 9; ++index)
         pageButtons[index]->setBounds(
             rackRect(pageX[index % 3], pageY[index / 3], 34, 18));
-    pageButtons[9]->setBounds(rackRect(1270, 76, 38, 18));
-    pageButtons[10]->setBounds(rackRect(396, 211, 34, 18));
-    pageButtons[11]->setBounds(rackRect(1183, 76, 38, 18));
+    pageButtons[9]->setBounds(rackRect(1270, 89, 38, 18));
+    pageButtons[10]->setBounds(rackRect(345, 203, 34, 18));
+    pageButtons[11]->setBounds(rackRect(1183, 89, 38, 18));
 
     modeButtons[0]->setBounds(rackRect(142, 69, 38, 18));
     modeButtons[1]->setBounds(rackRect(142, 119, 38, 18));
@@ -955,12 +1115,12 @@ void Eps16PanelEditor::resized() {
     downButton->setBounds(rackRect(589, 119, 39, 18));
     cancelButton->setBounds(rackRect(552, 183, 42, 22));
     enterButton->setBounds(rackRect(624, 183, 42, 22));
-    osDiskButton.setBounds(rackRect(1167, 20, 32, 36));
-    newDiskButton.setBounds(rackRect(1203, 20, 32, 36));
-    loadDiskButton.setBounds(rackRect(1239, 20, 32, 36));
-    saveDiskButton.setBounds(rackRect(1275, 20, 32, 36));
-    diskName.setBounds(rackRect(1167, 57, 140, 14));
+    osDiskButton.setBounds(rackRect(1160, 27, 39, 44));
+    newDiskButton.setBounds(rackRect(1203, 27, 39, 44));
+    loadDiskButton.setBounds(rackRect(1246, 27, 39, 44));
+    saveDiskButton.setBounds(rackRect(1289, 27, 39, 44));
+    diskName.setBounds(rackRect(1160, 6, 168, 17));
     diskName.setFont(juce::Font(juce::FontOptions(
-        "Helvetica Neue", 7.5f * scale, juce::Font::plain)));
+        "Helvetica Neue", 10.0f * scale, juce::Font::plain)));
 
 }
