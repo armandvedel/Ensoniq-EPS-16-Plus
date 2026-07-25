@@ -64,6 +64,19 @@ int main(int argc, char **argv) {
     if (!display.startsWith("MODE=FORWARD-NO LOOP")) return 1;
     juce::AudioBuffer<float> audio(2, 512);
     juce::MidiBuffer midi;
+    float restoredPeak = 0.0f;
+    for (unsigned int block = 0; block < 100; ++block) {
+        audio.clear();
+        processor.processBlock(audio, midi);
+        restoredPeak = std::max(
+            restoredPeak, std::max(audio.getMagnitude(0, 0, 512),
+                                   audio.getMagnitude(1, 0, 512)));
+    }
+    if (restoredPeak != 0.0f) {
+        std::cerr << "restored preset emitted held-note audio: "
+                  << restoredPeak << '\n';
+        return 1;
+    }
     midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
     float peak = 0.0f;
     for (unsigned int block = 0; block < 100; ++block) {
@@ -74,6 +87,7 @@ int main(int argc, char **argv) {
                                        audio.getMagnitude(1, 0, 512)));
     }
     std::cout << "status=" << processor.machineStatus()
-              << " display=|" << display << "| peak=" << peak << '\n';
+              << " display=|" << display << "| restored_peak=" << restoredPeak
+              << " played_peak=" << peak << '\n';
     return peak >= 0.00001f && !processor.illegalInstructions() ? 0 : 1;
 }

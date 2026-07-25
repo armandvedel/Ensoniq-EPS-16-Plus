@@ -371,6 +371,15 @@ int main(int argc, char **argv) {
     if (eps16_probe_machine_cycles() != saved_cycle ||
         eps16_probe_machine_sample_ram_write_bytes() != saved_writes)
         return 1;
+    const size_t restore_release_before =
+        eps16_probe_machine_panel_rx_consumed();
+    run_for(20000000);
+    const size_t restore_release_after =
+        eps16_probe_machine_panel_rx_consumed();
+    printf("restore_key_release_bytes=%zu\n",
+           restore_release_after - restore_release_before);
+    if (restore_release_after < restore_release_before + 61 * 2)
+        return 1;
     char restored_display[23];
     eps16_probe_machine_display(restored_display);
     if (memcmp(saved_display, restored_display, sizeof(saved_display))) return 1;

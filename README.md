@@ -5,6 +5,16 @@ Macs, built as a resizable VST3 instrument.
 
 ![EPS-16 Plus VST3 panel](docs/images/eps16-plus-vst3-panel.png)
 
+## 1.0.1 Beta bug-fix release
+
+- Presets saved while a MIDI key was held no longer restore that key as an
+  unreleaseable playing note.
+- Existing affected presets remain compatible. Snapshot versions 1–4 are
+  repaired automatically during restore by releasing the external keyboard
+  through the original KPC/OS event path.
+- Instruments, sample RAM, effects, display state and mounted disks remain
+  part of the complete preset and DAW-project state.
+
 ## About the EPS-16 Plus
 
 The EPS-16 Plus is a performance sampler whose character comes from much more
@@ -24,10 +34,10 @@ menus from text or bypass the sampler's own logic.
 
 ## Download
 
-### [Download EPS-16 Plus Prototype 1.0 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-1.0-Beta-arm64.zip)
+### [Download EPS-16 Plus Prototype 1.0.1 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-arm64.zip)
 
 SHA-256:
-`1163cf0412532ca843f9c7471f56db4095e927a881485eb0c74cd4dd0e126186`
+`28c6dc22a2ed4e3bad139c072814ef404ccb549c1e482ee750182b39b5d74e42`
 
 This build requires an Apple Silicon Mac, macOS 11 or newer and a VST3-capable
 DAW. It contains **VST3 only**; no Audio Unit is included.
@@ -163,7 +173,7 @@ project state.
 
 ## Known limitations
 
-- This is a **1.0 Beta** build for Apple Silicon macOS only.
+- This is a **1.0.1 Beta** build for Apple Silicon macOS only.
 - VST3 only; no AU is shipped.
 - The bundle is ad-hoc signed but not Apple-notarized. macOS may require
   explicit approval in Privacy & Security.
@@ -174,7 +184,7 @@ project state.
 
 ## Validation
 
-The 1.0 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
+The 1.0.1 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
 strictly code-sign verified and ZIP-tested. Automated and original-OS
 regressions cover:
 

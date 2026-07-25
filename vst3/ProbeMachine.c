@@ -44,6 +44,9 @@ typedef struct {
     uint32_t published_cursor_mask;
     int published_cursor_start, published_cursor_end;
     uint32_t last_keyon_frequency;
+    uint32_t restored_voice_mask;
+    unsigned int restored_quiet_frames;
+    int restored_output_suppressed;
 } PluginRuntimeState;
 
 struct Eps16ProbeMachine {
@@ -81,6 +84,12 @@ static _Thread_local Eps16ProbeMachine *plugin_current_machine;
     (plugin_current_machine->plugin.published_cursor_end)
 #define plugin_last_keyon_frequency \
     (plugin_current_machine->plugin.last_keyon_frequency)
+#define plugin_restored_voice_mask \
+    (plugin_current_machine->plugin.restored_voice_mask)
+#define plugin_restored_quiet_frames \
+    (plugin_current_machine->plugin.restored_quiet_frames)
+#define plugin_restored_output_suppressed \
+    (plugin_current_machine->plugin.restored_output_suppressed)
 
 static void plugin_capture_display(const char display[23], uint32_t decimal_mask,
                                    int cursor_start, int cursor_end,
@@ -94,8 +103,14 @@ static void plugin_capture_display(const char display[23], uint32_t decimal_mask
 }
 
 static void plugin_capture_keyon(unsigned int voice) {
-    if (plugin_current_machine && voice < ES5505_VOICES)
+    if (plugin_current_machine && voice < ES5505_VOICES) {
         plugin_last_keyon_frequency = es5505.voices[voice].frequency;
+        /* The OS has now constructed a genuinely new voice after restore.
+           It is intentional live/sequencer activity, so audio may resume. */
+        plugin_restored_voice_mask = 0;
+        plugin_restored_quiet_frames = 0;
+        plugin_restored_output_suppressed = 0;
+    }
 }
 
 #define PLUGIN_SNAPSHOT_FIELDS(X) \
@@ -271,6 +286,12 @@ static void plugin_render_audio(uint64_t elapsed_cycles, uint64_t end_cycle) {
              output < ES5505_STEREO_BUSES * 2; ++output)
             bus_outputs[output] = buses[output];
         es5505_core_render_buses(&es5505, bus_outputs, chunk);
+        if (plugin_restored_voice_mask) {
+            for (unsigned int voice = 0; voice < ES5505_VOICES; ++voice)
+                if (es5505.voices[voice].control & ES5505_STOP_MASK)
+                    plugin_restored_voice_mask &=
+                        ~(UINT32_C(1) << voice);
+        }
         audio_frames += chunk;
         frames_due -= chunk;
         for (size_t frame = 0; frame < chunk; ++frame) {
@@ -325,13 +346,30 @@ static void plugin_render_audio(uint64_t elapsed_cycles, uint64_t end_cycle) {
                 apply_master_volume((int32_t)esp_outputs[0] << 4);
             const int32_t output_right =
                 apply_master_volume((int32_t)esp_outputs[1] << 4);
-            int32_t output_magnitude = output_left < 0
-                ? -output_left : output_left;
+            if (plugin_restored_output_suppressed) {
+                const int restored_output_quiet =
+                    !plugin_restored_voice_mask &&
+                    esp_outputs[0] >= -1 && esp_outputs[0] <= 1 &&
+                    esp_outputs[1] >= -1 && esp_outputs[1] <= 1;
+                plugin_restored_quiet_frames = restored_output_quiet
+                    ? plugin_restored_quiet_frames + 1 : 0;
+                if (plugin_restored_quiet_frames >= 2048)
+                    plugin_restored_output_suppressed = 0;
+            }
+            const int32_t visible_output_left =
+                plugin_restored_output_suppressed ? 0 : output_left;
+            const int32_t visible_output_right =
+                plugin_restored_output_suppressed ? 0 : output_right;
+            int32_t output_magnitude = visible_output_left < 0
+                ? -visible_output_left : visible_output_left;
             if (output_magnitude > audio_peak) audio_peak = output_magnitude;
-            output_magnitude = output_right < 0 ? -output_right : output_right;
+            output_magnitude = visible_output_right < 0
+                ? -visible_output_right : visible_output_right;
             if (output_magnitude > audio_peak) audio_peak = output_magnitude;
-            plugin_output_left = (float)audio_to_pcm16(output_left) / 32768.0f;
-            plugin_output_right = (float)audio_to_pcm16(output_right) / 32768.0f;
+            plugin_output_left =
+                (float)audio_to_pcm16(visible_output_left) / 32768.0f;
+            plugin_output_right =
+                (float)audio_to_pcm16(visible_output_right) / 32768.0f;
             plugin_queue_audio(frame_cycle, output_divider,
                                plugin_output_left, plugin_output_right);
             frame_cycle += output_divider;
@@ -535,9 +573,9 @@ void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2) {
     }
     const unsigned int kind = status & 0xf0;
     const unsigned int channel = status & 0x0f;
-    if (kind == 0x90 && data2)
+    if (kind == 0x90 && data2) {
         live_note(data1, data2, 1);
-    else if (kind == 0x80 || (kind == 0x90 && !data2))
+    } else if (kind == 0x80 || (kind == 0x90 && !data2))
         live_note(data1, data2, 0);
     else if (kind == 0xa0 && channel == 0 &&
              midi_wire_count <=
@@ -897,6 +935,21 @@ int eps16_probe_machine_load_state(const void *data, size_t size,
     midi_rx_read = midi_rx_write = midi_rx_count = 0;
     midi_wire_read = midi_wire_write = midi_wire_count = 0;
     midi_wire_tail_cycle = 0;
+    plugin_restored_voice_mask = 0;
+    for (unsigned int voice = 0; voice < ES5505_VOICES; ++voice)
+        if (!(es5505.voices[voice].control & ES5505_STOP_MASK))
+            plugin_restored_voice_mask |= UINT32_C(1) << voice;
+    plugin_restored_quiet_frames = 0;
+    plugin_restored_output_suppressed =
+        plugin_restored_voice_mask != 0;
+    /* Host MIDI keys are physical inputs, not durable machine state.  A
+       snapshot taken while a host key was held nevertheless contains the
+       resulting OS key state and active ES5505 voice.  Reconcile every
+       restored snapshot, including versions 1-4, with the neutral external
+       keyboard that exists at preset recall.  Use the same KPC byte path as
+       ordinary host Note Off rather than stopping voices or editing OS RAM. */
+    for (unsigned int note = 36; note <= 96; ++note)
+        live_note(note, 1, 0);
     if (error && error_size) error[0] = '\0';
     return reader.current == reader.end;
 }
