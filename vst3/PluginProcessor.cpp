@@ -164,10 +164,6 @@ for (const auto metadata : midi)
         break;
 
         const auto message = metadata.getMessage();
-
-        if (message.isSysEx())
-            continue;
-        
         const auto* raw = message.getRawData();
         const auto length = message.getRawDataSize();
 if (length < 1) continue;
@@ -186,9 +182,6 @@ midiEvents[eventCount++] = {
     juce::jlimit(0, samples, metadata.samplePosition), raw[0],
     static_cast<std::uint8_t>(length > 1 ? raw[1] : 0),
     static_cast<std::uint8_t>(length > 2 ? raw[2] : 0)};
-
-            static_cast<std::uint8_t>(length > 1 ? raw[1] : 0),
-            static_cast<std::uint8_t>(length > 2 ? raw[2] : 0)};
 
     std::stable_sort(midiEvents.begin(), midiEvents.begin() + eventCount,
                      [](const auto &left, const auto &right) {

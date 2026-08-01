@@ -23,6 +23,23 @@ struct CaptureSink final : EmulatorSink {
         lastMidiData1 = data1;
         lastMidiData2 = data2;
     }
+    void midiBytes(const std::uint8_t *bytes,
+               std::size_t size,
+               std::uint64_t cycle) override
+    {
+        (void)bytes;
+        (void)size;
+        (void)cycle;
+    }
+
+    std::size_t drainMidiOutput(std::uint8_t *bytes,
+                            std::size_t capacity) override
+    {
+        (void)bytes;
+        (void)capacity;
+        return 0;
+    }
+    
     void panelByte(std::uint8_t value, std::uint64_t cycle) override {
         panelMessages.push_back({value, cycle});
     }
