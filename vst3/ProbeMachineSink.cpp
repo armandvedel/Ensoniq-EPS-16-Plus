@@ -162,6 +162,17 @@ void ProbeMachineSink::midi(std::uint8_t status, std::uint8_t data1,
     if (isReady()) eps16_probe_machine_midi(status, data1, data2);
 }
 
+void ProbeMachineSink::midiBytes(const std::uint8_t *bytes, std::size_t size,
+                                 std::uint64_t) {
+    if (isReady()) eps16_probe_machine_midi_bytes(bytes, size);
+}
+
+std::size_t ProbeMachineSink::drainMidiOutput(std::uint8_t *bytes,
+                                              std::size_t capacity) {
+    return isReady()
+        ? eps16_probe_machine_drain_midi_output(bytes, capacity) : 0;
+}
+
 void ProbeMachineSink::panelByte(std::uint8_t value, std::uint64_t) {
     if (isReady()) eps16_probe_machine_panel_byte(value);
 }

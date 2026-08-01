@@ -95,8 +95,12 @@ bool EmulatorBridge::prepare(double sampleRate) {
     controlWrite.store(0, std::memory_order_relaxed);
     controlDrops.store(0, std::memory_order_relaxed);
     publishedCycles.store(0, std::memory_order_relaxed);
+    sysExRead.store(0, std::memory_order_relaxed);
+    sysExWrite.store(0, std::memory_order_relaxed);
     hasPendingControl = false;
     nextPanelTransitionCycle = 0;
+    outputSysExSize = 0;
+    outputInSysEx = false;
     sink.prepare(sampleRate);
     return true;
 }
@@ -109,8 +113,12 @@ bool EmulatorBridge::resetTimeline() {
     controlWrite.store(0, std::memory_order_relaxed);
     controlDrops.store(0, std::memory_order_relaxed);
     publishedCycles.store(0, std::memory_order_relaxed);
+    sysExRead.store(0, std::memory_order_relaxed);
+    sysExWrite.store(0, std::memory_order_relaxed);
     hasPendingControl = false;
     nextPanelTransitionCycle = 0;
+    outputSysExSize = 0;
+    outputInSysEx = false;
     return true;
 }
 
@@ -148,7 +156,35 @@ bool EmulatorBridge::enqueueAnalog(unsigned int channel, std::uint16_t value) {
                     value});
 }
 
+bool EmulatorBridge::enqueueSysEx(const std::uint8_t *bytes,
+                                  std::size_t size) {
+    if (!bytes || size < 2 || size > sysExMessageCapacity ||
+        bytes[0] != 0xf0 || bytes[size - 1] != 0xf7)
+        return false;
+    const auto write = sysExWrite.load(std::memory_order_relaxed);
+    const auto next = (write + 1) % sysExQueueCapacity;
+    if (next == sysExRead.load(std::memory_order_acquire)) return false;
+    auto &message = queuedSysEx[write];
+    std::copy_n(bytes, size, message.bytes.begin());
+    message.size = size;
+    sysExWrite.store(next, std::memory_order_release);
+    return true;
+}
+
+bool EmulatorBridge::dequeueSysEx(QueuedSysEx &message) {
+    const auto read = sysExRead.load(std::memory_order_relaxed);
+    if (read == sysExWrite.load(std::memory_order_acquire)) return false;
+    message = queuedSysEx[read];
+    sysExRead.store((read + 1) % sysExQueueCapacity,
+                    std::memory_order_release);
+    return true;
+}
+
 void EmulatorBridge::dispatchControls(std::uint64_t cycle) {
+    QueuedSysEx sysEx;
+    while (dequeueSysEx(sysEx))
+        sink.midiBytes(sysEx.bytes.data(), sysEx.size, cycle);
+
     ControlEvent event;
     for (;;) {
         if (hasPendingControl) {
@@ -175,6 +211,10 @@ void EmulatorBridge::dispatchControls(std::uint64_t cycle) {
 }
 
 void EmulatorBridge::dispatchMidi(const MidiEvent &event, std::uint64_t cycle) {
+    if (event.bytes && event.size) {
+        sink.midiBytes(event.bytes, event.size, cycle);
+        return;
+    }
     const auto type = static_cast<std::uint8_t>(event.status & 0xf0);
     if (event.status >= 0xf8 ||
         type == 0x80 || type == 0x90 || type == 0xa0 || type == 0xb0 ||
@@ -182,10 +222,51 @@ void EmulatorBridge::dispatchMidi(const MidiEvent &event, std::uint64_t cycle) {
         sink.midi(event.status, event.data1, event.data2, cycle);
 }
 
+void EmulatorBridge::collectMidiOutput(int sampleOffset,
+                                       SysExOutputEvent *output,
+                                       std::size_t capacity,
+                                       std::size_t &count) {
+    std::uint8_t bytes[64];
+    for (;;) {
+        const auto byteCount = sink.drainMidiOutput(bytes, sizeof(bytes));
+        for (std::size_t index = 0; index < byteCount; ++index) {
+            const auto value = bytes[index];
+            if (value >= 0xf8 && value != 0xf7) continue;
+            if (value == 0xf0) {
+                outputInSysEx = true;
+                outputSysExSize = 0;
+            }
+            if (!outputInSysEx) continue;
+            if (outputSysExSize == outputSysEx.size()) {
+                outputInSysEx = false;
+                outputSysExSize = 0;
+                continue;
+            }
+            outputSysEx[outputSysExSize++] = value;
+            if (value != 0xf7) continue;
+            outputInSysEx = false;
+            if (output && count < capacity) {
+                auto &event = output[count++];
+                event.sampleOffset = sampleOffset;
+                event.size = outputSysExSize;
+                std::copy_n(outputSysEx.begin(), outputSysExSize,
+                            event.bytes.begin());
+            }
+            outputSysExSize = 0;
+        }
+        if (byteCount < sizeof(bytes)) break;
+    }
+}
+
 void EmulatorBridge::process(const float *inputLeft, const float *inputRight,
                              float *outputLeft, float *outputRight, int samples,
                              const MidiEvent *midiEvents,
-                             std::size_t midiEventCount) {
+                             std::size_t midiEventCount,
+                             SysExOutputEvent *sysExOutput,
+                             std::size_t sysExOutputCapacity,
+                             std::size_t *sysExOutputCount) {
+    std::size_t outputCount = 0;
+    if (sysExOutputCount) *sysExOutputCount = 0;
     if (samples <= 0 || !outputLeft || !outputRight) return;
     if (!sink.beginBlock()) {
         std::fill_n(outputLeft, samples, 0.0f);
@@ -206,6 +287,8 @@ void EmulatorBridge::process(const float *inputLeft, const float *inputRight,
         sink.samplingInput(inLeft, inRight, clock.cycles());
         const auto cycle = clock.advanceOneSample();
         sink.runUntil(cycle);
+        collectMidiOutput(sample, sysExOutput, sysExOutputCapacity,
+                          outputCount);
         float left = 0.0f;
         float right = 0.0f;
         sink.stereoOutput(left, right, cycle);
@@ -216,8 +299,11 @@ void EmulatorBridge::process(const float *inputLeft, const float *inputRight,
         dispatchMidi(midiEvents[midiIndex], clock.cycles());
         ++midiIndex;
     }
+    collectMidiOutput(samples - 1, sysExOutput, sysExOutputCapacity,
+                      outputCount);
     publishedCycles.store(clock.cycles(), std::memory_order_relaxed);
     sink.endBlock();
+    if (sysExOutputCount) *sysExOutputCount = outputCount;
 }
 
 } // namespace eps16::vst3

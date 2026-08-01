@@ -5,6 +5,14 @@ Macs, built as a resizable VST3 instrument.
 
 ![EPS-16 Plus VST3 panel](docs/images/eps16-plus-vst3-panel.png)
 
+## 1.0.2 Beta
+
+- Standard EPS SysEx messages now pass between the VST3 host and the emulated
+  MIDI UART. The original OS and its `MIDI SYS-EX` setting remain in control.
+- Fixed `EFFECT DOWNLOAD FAILED` for longer external Waveboy effects,
+  including `RESON FILTER` and `FM+FX`, by preserving ES5510 host access while
+  the original OS verifies the program and honoring its host-release command.
+
 ## 1.0.1 Beta bug-fix release
 
 - Presets saved while a MIDI key was held no longer restore that key as an
@@ -34,10 +42,10 @@ menus from text or bypass the sampler's own logic.
 
 ## Download
 
-### [Download EPS-16 Plus Prototype 1.0.1 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-arm64.zip)
+### [Download EPS-16 Plus Prototype 1.0.2 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-arm64.zip)
 
 SHA-256:
-`28c6dc22a2ed4e3bad139c072814ef404ccb549c1e482ee750182b39b5d74e42`
+`3e965725ad9ec2b2c18b2fc9e8f6dc23bd594043030fe9d4d0fdf601dd318409`
 
 This build requires an Apple Silicon Mac, macOS 11 or newer and a VST3-capable
 DAW. It contains **VST3 only**; no Audio Unit is included.
@@ -61,6 +69,8 @@ DAW. It contains **VST3 only**; no Audio Unit is included.
   front-panel editing workflow.
 - MIDI notes and velocity, Pitch Wheel, Mod Wheel and channel-1 polyphonic
   aftertouch delivered through the appropriate emulated hardware paths.
+- Standard EPS SysEx input and output through the emulated MIDI UART, governed
+  by the original OS and its `MIDI SYS-EX` setting.
 - Original EPS sequencer controls. Ableton tempo, Start, Continue and Stop can
   drive the EPS through MIDI Clock when `CLOCK SOURCE=MIDI` is selected.
 - Independent plug-in instances and complete DAW project/preset restore,
@@ -173,7 +183,7 @@ project state.
 
 ## Known limitations
 
-- This is a **1.0.1 Beta** build for Apple Silicon macOS only.
+- This is a **1.0.2 Beta** build for Apple Silicon macOS only.
 - VST3 only; no AU is shipped.
 - The bundle is ad-hoc signed but not Apple-notarized. macOS may require
   explicit approval in Privacy & Security.
@@ -184,13 +194,14 @@ project state.
 
 ## Validation
 
-The 1.0.1 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
+The 1.0.2 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
 strictly code-sign verified and ZIP-tested. Automated and original-OS
 regressions cover:
 
 - LINE and MIC sampling, threshold movement, recording and audible playback;
 - VFD fields and cursor segment masks;
-- ES5510 effects 10–13 and audio-bus routing;
+- ES5510 effects 10–13, external Waveboy effect downloads and audio-bus routing;
+- bidirectional standard EPS SysEx transport through the emulated MIDI UART;
 - Pitch Wheel, Mod Wheel, MIDI pressure transport and Note Off;
 - sequencer RECORD/PLAY/STOP and DAW-clock serialization;
 - IMG/HFE I/O, disk swapping and blank-disk creation;

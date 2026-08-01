@@ -1,4 +1,4 @@
-EPS-16 Plus Prototype 1.0.1 Beta external files
+EPS-16 Plus Prototype 1.0.2 Beta external files
 ===============================================
 
 Place the user-supplied files in this EPS_files folder, next to the installed

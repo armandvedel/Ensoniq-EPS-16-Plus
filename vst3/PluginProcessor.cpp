@@ -157,11 +157,12 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                     midiEvents.data(), midiEvents.size());
         }
     }
-    for (const auto metadata : midi)
-    {
-        if (eventCount == midiEvents.size())
-            break;
-        
+std::size_t sysExInputCount = 0;
+for (const auto metadata : midi)
+{
+    if (eventCount == midiEvents.size())
+        break;
+
         const auto message = metadata.getMessage();
 
         if (message.isSysEx())
@@ -169,14 +170,23 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         
         const auto* raw = message.getRawData();
         const auto length = message.getRawDataSize();
+if (length < 1) continue;
+if (message.isSysEx()) {
+    if (sysExInputCount == sysExInput.size() ||
+        static_cast<std::size_t>(length) > maximumInputSysExBytes)
+        continue;
+    auto &storage = sysExInput[sysExInputCount++];
+    std::copy_n(raw, length, storage.begin());
+    midiEvents[eventCount++] = {
+        juce::jlimit(0, samples, metadata.samplePosition),
+        0, 0, 0, storage.data(), static_cast<std::size_t>(length)};
+    continue;
+}
+midiEvents[eventCount++] = {
+    juce::jlimit(0, samples, metadata.samplePosition), raw[0],
+    static_cast<std::uint8_t>(length > 1 ? raw[1] : 0),
+    static_cast<std::uint8_t>(length > 2 ? raw[2] : 0)};
 
-        if (length < 1)
-            continue;
-
-        midiEvents[eventCount++] =
-        {
-            juce::jlimit(0, samples, metadata.samplePosition),
-            raw[0],
             static_cast<std::uint8_t>(length > 1 ? raw[1] : 0),
             static_cast<std::uint8_t>(length > 2 ? raw[2] : 0)};
 
@@ -186,17 +196,25 @@ void Eps16PlusProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                      });
     }
 
-    
-
-    bridge.process(inputLeft,
-                   inputRight,
-                   mainOutput.getWritePointer(0),
-                   mainOutput.getWritePointer(1),
-                   samples,
-                   midiEvents.data(),
-                   eventCount);
+std::size_t sysExOutputCount = 0;
+bridge.process(inputLeft,
+               inputRight,
+               mainOutput.getWritePointer(0),
+               mainOutput.getWritePointer(1),
+               samples,
+               midiEvents.data(),
+               eventCount,
+               sysExOutput.data(),
+               sysExOutput.size(),
+               &sysExOutputCount);
 
     midi.clear();
+    for (std::size_t index = 0; index < sysExOutputCount; ++index) {
+        const auto &event = sysExOutput[index];
+        midi.addEvent(juce::MidiMessage(event.bytes.data(),
+                                       static_cast<int>(event.size)),
+                      event.sampleOffset);
+    }
 }
 
 juce::AudioProcessorEditor *Eps16PlusProcessor::createEditor() {
