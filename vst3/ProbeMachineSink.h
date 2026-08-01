@@ -30,6 +30,10 @@ public:
     void runUntil(std::uint64_t absoluteCpuCycle) override;
     void midi(std::uint8_t status, std::uint8_t data1,
               std::uint8_t data2, std::uint64_t cycle) override;
+    void midiBytes(const std::uint8_t *bytes, std::size_t size,
+                   std::uint64_t cycle) override;
+    std::size_t drainMidiOutput(std::uint8_t *bytes,
+                                std::size_t capacity) override;
     void panelByte(std::uint8_t value, std::uint64_t cycle) override;
     void analog(unsigned int channel, std::uint16_t value,
                 std::uint64_t cycle) override;

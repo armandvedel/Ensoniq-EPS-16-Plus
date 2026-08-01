@@ -132,7 +132,7 @@ juce_add_plugin(Eps16Plus
   PRODUCT_NAME "EPS-16 Plus Prototype"
   IS_SYNTH TRUE
   NEEDS_MIDI_INPUT TRUE
-  NEEDS_MIDI_OUTPUT FALSE
+  NEEDS_MIDI_OUTPUT TRUE
   IS_MIDI_EFFECT FALSE
   EDITOR_WANTS_KEYBOARD_FOCUS TRUE
   COPY_PLUGIN_AFTER_BUILD FALSE
@@ -258,6 +258,14 @@ add_test(NAME vst3_editor_smoke COMMAND eps16_vst3_editor_smoke_test)
 
 add_executable(eps16_vst3_plugin_state_test PluginStateTest.cpp)
 target_link_libraries(eps16_vst3_plugin_state_test PRIVATE
+  Eps16Plus
+  juce::juce_gui_basics
+)
+
+add_executable(eps16_vst3_plugin_external_effect_test
+  PluginExternalEffectTest.cpp
+)
+target_link_libraries(eps16_vst3_plugin_external_effect_test PRIVATE
   Eps16Plus
   juce::juce_gui_basics
 )

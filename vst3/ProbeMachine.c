@@ -588,6 +588,26 @@ void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2) {
         live_performance_midi(status, data1, data2);
 }
 
+size_t eps16_probe_machine_midi_bytes(const uint8_t *bytes, size_t size) {
+    if (!plugin_initialized || (!bytes && size)) return 0;
+    size_t accepted = 0;
+    while (accepted < size &&
+           midi_schedule_at(bytes[accepted], bus_cycle_now()))
+        ++accepted;
+    return accepted;
+}
+
+size_t eps16_probe_machine_drain_midi_output(uint8_t *bytes,
+                                             size_t capacity) {
+    if (!plugin_initialized || !bytes || !capacity) return 0;
+    const size_t count = midi_tx_count < capacity ? midi_tx_count : capacity;
+    memcpy(bytes, midi_tx, count);
+    midi_tx_count -= count;
+    if (midi_tx_count)
+        memmove(midi_tx, midi_tx + count, midi_tx_count);
+    return count;
+}
+
 size_t eps16_probe_machine_midi_rx_consumed(void) {
     return plugin_initialized ? midi_rx_consumed : 0;
 }

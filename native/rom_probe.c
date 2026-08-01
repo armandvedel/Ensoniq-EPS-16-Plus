@@ -1066,6 +1066,12 @@ static void es5505_write8(unsigned int address, uint8_t value) {
 static uint8_t es5510_read(unsigned int address) {
     unsigned int offset = ((address - ES5510_BASE) >> 1) & 0xff;
     if (!(address & 1)) return 0;
+    /* Host access remains active while the 68000 is still transferring or
+       verifying an ESP program.  External effect files can take longer to
+       verify than the ROM programs; expiring from the last instruction write
+       lets the running DSP alter a GPR underneath the original OS readback. */
+    if (es5510_host_upload_active && offset <= 8)
+        es5510_host_access_until = bus_cycle_now() + 250000;
     /* The sampling overlay selects GPR 80 again before every conversion,
        waits on the selected latch's low valid byte, then reads high/middle
        with MOVEP.  Selection refreshes the latch in es5510_write(); doing it
@@ -1120,6 +1126,14 @@ static void es5510_write(unsigned int address, uint8_t value) {
            uploading the replacement program. */
         if ((value & 0x02) && es5510.halted)
             memset(es5510.dram, 0, sizeof(es5510.dram));
+        /* The original OS ends a completed host transfer with bit 0.  Release
+           the access hold at that hardware transition instead of waiting for
+           an arbitrary quiet interval; this also lets the sampling overlay
+           begin immediately after its verified upload. */
+        if (value & 0x01) {
+            es5510_host_upload_active = 0;
+            es5510_core_set_halted(&es5510, 0);
+        }
     } else if (offset == 0x14) {
         es5510_ram_read = value & 0x80;
     } else if (offset == 0x18) {
