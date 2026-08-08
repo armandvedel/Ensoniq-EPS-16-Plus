@@ -3,7 +3,7 @@
 Hardware-level emulation of the Ensoniq EPS-16 Plus sampler for Apple Silicon
 Macs, built as a resizable VST3 instrument.
 
-![EPS-16 Plus VST3 panel](docs/images/eps16-plus-vst3-panel.png)
+![EPS-16 Plus VST3 panel and keyboard](docs/images/eps16-plus-vst3-panel-keyboard.png)
 
 ## 1.0.3 Beta
 
