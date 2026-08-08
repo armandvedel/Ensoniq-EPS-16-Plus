@@ -1,11 +1,11 @@
 # Ensoniq EPS-16 Plus VST3 Emulator
 
-Hardware-level emulation of the Ensoniq EPS-16 Plus sampler for Apple Silicon
-Macs, built as a resizable VST3 instrument.
+Hardware-level emulation of the Ensoniq EPS-16 Plus sampler for Intel and
+Apple Silicon Macs, built as a resizable VST3 instrument.
 
 ![EPS-16 Plus VST3 panel and keyboard](docs/images/eps16-plus-vst3-panel-keyboard.png)
 
-## 1.0.3 Beta
+## 1.0.3
 
 - Added an expandable 61-key on-screen keyboard with click-height velocity,
   delivered through the original EPS keyboard-controller path.
@@ -13,6 +13,8 @@ Macs, built as a resizable VST3 instrument.
   remains latched, and both use the original analog controller inputs.
 - Refined the wheel travel and panel fader sizing and spacing while preserving
   the established compact hardware-inspired GUI.
+- Added Intel x86_64 support targeting macOS 10.13 High Sierra. The universal
+  VST3 contains both Intel and Apple Silicon code in one installation.
 
 ## 1.0.2 Beta
 
@@ -51,13 +53,14 @@ menus from text or bypass the sampler's own logic.
 
 ## Download
 
-### [Download EPS-16 Plus Prototype 1.0.3 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-arm64.zip)
+### [Download EPS-16 Plus Prototype 1.0.3 — macOS Universal VST3](release/EPS-16-Plus-Prototype-macOS-universal.zip)
 
 SHA-256:
-`ae63fb2e17ead13b7bbe229ee5551b014d3338c4937bf9ea2b429cef8c4f4c07`
+`57e8a84a37e40cb71ea8b1261f7a849696335d759fcd0aebb6cc74fd523454c1`
 
-This build requires an Apple Silicon Mac, macOS 11 or newer and a VST3-capable
-DAW. It contains **VST3 only**; no Audio Unit is included.
+The universal package supports Intel Macs with macOS 10.13 High Sierra or
+newer and Apple Silicon Macs with macOS 11 or newer. It requires a VST3-capable
+DAW and contains **VST3 only**; no Audio Unit is included.
 
 > **Original Ensoniq files are required.** ROM, KPC firmware and operating
 > system disk images are copyrighted and are not included in this repository
@@ -196,7 +199,8 @@ project state.
 
 ## Known limitations
 
-- This is a **1.0.3 Beta** build for Apple Silicon macOS only.
+- This is the **1.0.3** release for Intel macOS 10.13+ and Apple Silicon
+  macOS 11+.
 - VST3 only; no AU is shipped.
 - The bundle is ad-hoc signed but not Apple-notarized. macOS may require
   explicit approval in Privacy & Security.
@@ -207,7 +211,8 @@ project state.
 
 ## Validation
 
-The 1.0.3 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
+The 1.0.3 universal package contains checked x86_64 and arm64 slices with
+deployment targets macOS 10.13 and macOS 11 respectively. It is ad-hoc signed,
 strictly code-sign verified and ZIP-tested. Automated and original-OS
 regressions cover:
 
@@ -261,7 +266,8 @@ license details. The same notices are included in the downloadable package.
 
 ## Build
 
-Place JUCE 8 at `work/deps/JUCE` and Musashi at `work/deps/Musashi`, then:
+Place JUCE 8 at `work/deps/JUCE` and Musashi at `work/deps/Musashi`. Build the
+two architecture slices and then combine them into the release package:
 
 ```sh
 cmake -S . -B work/vst3-build \
@@ -270,9 +276,25 @@ cmake -S . -B work/vst3-build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64
 
-cmake --build work/vst3-build --target eps16_vst3_package -j 8
+cmake --build work/vst3-build --target Eps16Plus_VST3 -j 8
+
+cmake -S . -B work/vst3-build-high-sierra \
+  -DEPS16_BUILD_VST3=ON \
+  -DEPS16_JUCE_DIR="$PWD/work/deps/JUCE" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+
+cmake --build work/vst3-build-high-sierra --target Eps16Plus_VST3 -j 8
+
+cmake -S . -B work/vst3-build \
+  -DEPS16_X86_64_VST3_BUNDLE="$PWD/work/vst3-build-high-sierra/vst3/Eps16Plus_artefacts/Release/VST3/EPS-16 Plus Prototype.vst3"
+
+cmake --build work/vst3-build --target eps16_vst3_universal_package -j 8
 ctest --test-dir work/vst3-build --output-on-failure
+ctest --test-dir work/vst3-build-high-sierra --output-on-failure
 ```
 
-The package target creates a verified VST3 archive without building or
+The universal package target verifies both architectures and their deployment
+targets, signs the combined bundle and creates one VST3 archive without
 shipping an Audio Unit.

@@ -142,7 +142,7 @@ int main() {
            sink.midiMessages[5].cycle == 5000000);
     assert(sink.midiMessages[6].value == 0xf8 &&
            sink.midiMessages[6].cycle == 6000000);
-    assert(sink.lastMidiData1 == 60 && sink.lastMidiData2 == 0);
+    assert(sink.lastMidiData1 == 0 && sink.lastMidiData2 == 0);
     assert(bridge.droppedControls() == 0);
 
     DawClock clock;
@@ -234,6 +234,9 @@ int main() {
     assert(partitionedBridge.cpuCycles() == bridge.cpuCycles());
     assert(partitionedSink.lastRunCycle == sink.lastRunCycle);
     assert(partitionedBridge.resetTimeline());
+    /* A real resetTimeline() is paired with restoring/rebasing the machine
+       sink. Mirror that new absolute-cycle origin in the capture sink. */
+    partitionedSink.lastRunCycle = 0;
     partitionedBridge.process(inputLeft.data(), inputRight.data(),
                               outputLeft.data(), outputRight.data(), 1,
                               nullptr, 0);

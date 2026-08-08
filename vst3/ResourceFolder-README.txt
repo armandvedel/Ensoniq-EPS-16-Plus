@@ -1,5 +1,8 @@
-EPS-16 Plus Prototype 1.0.3 Beta external files
-===============================================
+EPS-16 Plus Prototype 1.0.3 external files
+==========================================
+
+The universal VST3 supports Intel macOS 10.13 or newer and Apple Silicon
+macOS 11 or newer in the same plug-in bundle.
 
 Place the user-supplied files in this EPS_files folder, next to the installed
 VST3 plug-in. The plug-in never contains or redistributes these copyrighted
