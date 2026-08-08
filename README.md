@@ -11,8 +11,6 @@ Apple Silicon Macs, built as a resizable VST3 instrument.
   delivered through the original EPS keyboard-controller path.
 - Added hardware-style Pitch and Mod wheels. Pitch returns to centre, Mod
   remains latched, and both use the original analog controller inputs.
-- Refined the wheel travel and panel fader sizing and spacing while preserving
-  the established compact hardware-inspired GUI.
 - Added Intel x86_64 support targeting macOS 10.13 High Sierra. The universal
   VST3 contains both Intel and Apple Silicon code in one installation.
 
