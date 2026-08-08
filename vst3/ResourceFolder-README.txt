@@ -1,4 +1,4 @@
-EPS-16 Plus Prototype 1.0.3 external files
+EPS-16 Plus Prototype 1.0.4 external files
 ==========================================
 
 The universal VST3 supports Intel macOS 10.13 or newer and Apple Silicon

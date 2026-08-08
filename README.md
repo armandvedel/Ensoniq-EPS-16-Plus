@@ -5,6 +5,15 @@ Apple Silicon Macs, built as a resizable VST3 instrument.
 
 ![EPS-16 Plus VST3 panel and keyboard](docs/images/eps16-plus-vst3-panel-keyboard.png)
 
+## 1.0.4
+
+- Added a Terminal installer that removes download metadata and prepares the
+  plug-in before it enters the DAW's watched VST3 folder, preventing a first
+  Gatekeeper rejection from being cached by the host.
+- Installation now stages, verifies and locally signs the complete universal
+  bundle before atomically placing it in the VST3 folder. No DAW database
+  changes are part of installation.
+
 ## 1.0.3
 
 - Added an expandable 61-key on-screen keyboard with click-height velocity,
@@ -51,10 +60,10 @@ menus from text or bypass the sampler's own logic.
 
 ## Download
 
-### [Download EPS-16 Plus Prototype 1.0.3 — macOS Universal VST3](release/EPS-16-Plus-Prototype-macOS-universal.zip)
+### [Download EPS-16 Plus Prototype 1.0.4 — macOS Universal VST3](release/EPS-16-Plus-Prototype-macOS-universal.zip)
 
 SHA-256:
-`57e8a84a37e40cb71ea8b1261f7a849696335d759fcd0aebb6cc74fd523454c1`
+`35353404ffb22d99589ac2071a3257c598a960a070609338bc4249edf3fbf344`
 
 The universal package supports Intel Macs with macOS 10.13 High Sierra or
 newer and Apple Silicon Macs with macOS 11 or newer. It requires a VST3-capable
@@ -96,14 +105,16 @@ DAW and contains **VST3 only**; no Audio Unit is included.
 ## Installation
 
 1. Quit the DAW and unpack the ZIP.
-2. Copy `EPS-16 Plus Prototype.vst3` to:
+2. Open Terminal, type `/bin/bash ` (including the trailing space), drag
+   `Install EPS-16 Plus.command` from the unpacked folder into Terminal and
+   press Return. The installer removes download metadata, verifies the bundle
+   and prepares its local signature before atomically placing it in the DAW's
+   watched VST3 folder.
+3. Add your own legally obtained files to the installed `EPS_files` folder:
 
    ```text
-   ~/Library/Audio/Plug-Ins/VST3/
+   ~/Library/Audio/Plug-Ins/VST3/EPS_files/
    ```
-
-3. Copy the included `EPS_files` folder beside the VST3 bundle.
-4. Add your own legally obtained files to `EPS_files`:
 
    ```text
    eps16plus-rom.bin   combined 128 KiB U28/U27 main ROM
@@ -114,7 +125,7 @@ DAW and contains **VST3 only**; no Audio Unit is included.
    `EPS130OS.hfe` is also accepted. The original filename
    `Ensoniq EPS KPC2 v2.33 27c256.BIN` is recognized without renaming.
 
-5. Start the DAW, rescan VST3 plug-ins and insert the emulator as an
+4. Start the DAW, rescan VST3 plug-ins and insert the emulator as an
    instrument. A successful boot normally reaches `NO INSTRUMENTS`.
 
 The resulting layout should be:
@@ -197,11 +208,12 @@ project state.
 
 ## Known limitations
 
-- This is the **1.0.3** release for Intel macOS 10.13+ and Apple Silicon
+- This is the **1.0.4** release for Intel macOS 10.13+ and Apple Silicon
   macOS 11+.
 - VST3 only; no AU is shipped.
-- The bundle is ad-hoc signed but not Apple-notarized. macOS may require
-  explicit approval in Privacy & Security.
+- The bundle is ad-hoc signed but not Apple-notarized. Use the included
+  Terminal installer so it is prepared before the DAW scans it for the first
+  time.
 - The original EPS has no MPE voice-expression model.
 - There is intentionally no modern host-side parameter editor or sample
   browser. The original OS, panel workflow and EPS manual remain authoritative.
@@ -209,7 +221,7 @@ project state.
 
 ## Validation
 
-The 1.0.3 universal package contains checked x86_64 and arm64 slices with
+The 1.0.4 universal package contains checked x86_64 and arm64 slices with
 deployment targets macOS 10.13 and macOS 11 respectively. It is ad-hoc signed,
 strictly code-sign verified and ZIP-tested. Automated and original-OS
 regressions cover:

@@ -198,6 +198,7 @@ if(EPS16_X86_64_VST3_BUNDLE)
             "-DX86_BUNDLE=${EPS16_X86_64_VST3_BUNDLE}"
             "-DPACKAGE_DIR=${CMAKE_BINARY_DIR}/vst3-universal-package"
             "-DRESOURCE_README=${CMAKE_CURRENT_SOURCE_DIR}/ResourceFolder-README.txt"
+            "-DINSTALLER=${CMAKE_CURRENT_SOURCE_DIR}/InstallMac.command"
             "-DTHIRD_PARTY_NOTICES=${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
             "-DJUCE_LICENSE=${EPS16_JUCE_DIR}/LICENSE.md"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/PackageUniversalMac.cmake"
