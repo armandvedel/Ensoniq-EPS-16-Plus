@@ -5,6 +5,13 @@ Apple Silicon Macs, built as a resizable VST3 instrument.
 
 ![EPS-16 Plus VST3 panel and keyboard](docs/images/eps16-plus-vst3-panel-keyboard.png)
 
+## 1.0.5
+
+- Fixed external-file discovery when the VST3 is installed in the user folder
+  but existing ROM, KPC and OS files remain in the system-wide `EPS_files`
+  folder, or vice versa. Both standard locations are now searched
+  automatically; no file move or DAW database change is required.
+
 ## 1.0.4
 
 - Added a Terminal installer that removes download metadata and prepares the
@@ -60,10 +67,10 @@ menus from text or bypass the sampler's own logic.
 
 ## Download
 
-### [Download EPS-16 Plus Prototype 1.0.4 — macOS Universal VST3](release/EPS-16-Plus-Prototype-macOS-universal.zip)
+### [Download EPS-16 Plus Prototype 1.0.5 — macOS Universal VST3](release/EPS-16-Plus-Prototype-macOS-universal.zip)
 
 SHA-256:
-`35353404ffb22d99589ac2071a3257c598a960a070609338bc4249edf3fbf344`
+`742b7191b939f413fbf5a34813157c61663bbc516452a10c954d32aef9801524`
 
 The universal package supports Intel Macs with macOS 10.13 High Sierra or
 newer and Apple Silicon Macs with macOS 11 or newer. It requires a VST3-capable
@@ -208,7 +215,7 @@ project state.
 
 ## Known limitations
 
-- This is the **1.0.4** release for Intel macOS 10.13+ and Apple Silicon
+- This is the **1.0.5** release for Intel macOS 10.13+ and Apple Silicon
   macOS 11+.
 - VST3 only; no AU is shipped.
 - The bundle is ad-hoc signed but not Apple-notarized. Use the included
@@ -221,7 +228,7 @@ project state.
 
 ## Validation
 
-The 1.0.4 universal package contains checked x86_64 and arm64 slices with
+The 1.0.5 universal package contains checked x86_64 and arm64 slices with
 deployment targets macOS 10.13 and macOS 11 respectively. It is ad-hoc signed,
 strictly code-sign verified and ZIP-tested. Automated and original-OS
 regressions cover:

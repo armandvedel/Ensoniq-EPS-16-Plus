@@ -286,19 +286,40 @@ juce::File Eps16PlusProcessor::defaultResourceDirectory() {
 }
 
 void Eps16PlusProcessor::refreshResourcePaths() {
-    const auto directory = defaultResourceDirectory();
-    if (!directory.isDirectory()) return;
+    juce::Array<juce::File> directories;
+    const auto addDirectory = [&directories](const juce::File &directory) {
+        if (directory.isDirectory() && !directories.contains(directory))
+            directories.add(directory);
+    };
+    addDirectory(defaultResourceDirectory());
+    addDirectory(juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                     .getChildFile("Library/Audio/Plug-Ins/VST3/EPS_files"));
+    addDirectory(juce::File("/Library/Audio/Plug-Ins/VST3/EPS_files"));
+    if (directories.isEmpty()) return;
 
-    auto discover = [this, &directory](const juce::Identifier &key,
-                                       std::initializer_list<const char *> names,
-                                       std::int64_t fallbackSize,
-                                       const juce::String &fallbackPattern) {
+    auto discover = [this, &directories](
+                        const juce::Identifier &key,
+                        std::initializer_list<const char *> names,
+                        std::int64_t fallbackSize,
+                        const juce::String &fallbackPattern) {
         const juce::File selected(getResourcePath(key));
         if (selected.existsAsFile()) return;
-        auto found = firstExisting(directory, names);
-        if (!found.existsAsFile() && fallbackSize > 0)
-            found = firstFileWithSize(directory, fallbackPattern, fallbackSize);
-        if (found.existsAsFile()) setResourcePath(key, found.getFullPathName());
+        for (const auto &directory : directories) {
+            const auto found = firstExisting(directory, names);
+            if (found.existsAsFile()) {
+                setResourcePath(key, found.getFullPathName());
+                return;
+            }
+        }
+        if (fallbackSize <= 0) return;
+        for (const auto &directory : directories) {
+            const auto found = firstFileWithSize(directory, fallbackPattern,
+                                                 fallbackSize);
+            if (found.existsAsFile()) {
+                setResourcePath(key, found.getFullPathName());
+                return;
+            }
+        }
     };
 
     discover(romPathKey, {"eps16plus-rom.bin"}, 131072, "*.bin;*.rom");
@@ -307,11 +328,16 @@ void Eps16PlusProcessor::refreshResourcePaths() {
              32768, "*.bin;*.rom");
     discover(osDiskPathKey, {"EPS130OS.img", "EPS130OS.hfe"}, 819200, "*.img");
     if (!juce::File(getResourcePath(osDiskPathKey)).existsAsFile()) {
-        auto hfeFiles = directory.findChildFiles(juce::File::findFiles, false,
-                                                 "*.hfe;*.HFE");
-        hfeFiles.sort();
-        if (!hfeFiles.isEmpty())
-            setResourcePath(osDiskPathKey, hfeFiles.getFirst().getFullPathName());
+        for (const auto &directory : directories) {
+            auto hfeFiles = directory.findChildFiles(juce::File::findFiles,
+                                                      false, "*.hfe;*.HFE");
+            hfeFiles.sort();
+            if (!hfeFiles.isEmpty()) {
+                setResourcePath(osDiskPathKey,
+                                hfeFiles.getFirst().getFullPathName());
+                break;
+            }
+        }
     }
 }
 

@@ -2,12 +2,38 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <iostream>
 #include <memory>
 
 int main(int argc, char **argv) {
     const juce::ScopedJuceInitialiser_GUI gui;
     Eps16PlusProcessor processor;
-    processor.setResourcePath(Eps16PlusProcessor::romPathKey, "/tmp/test-rom.bin");
+    if (argc == 5 && std::string(argv[1]) == "--verify-resources") {
+        processor.refreshResourcePaths();
+        const auto matches = [&processor](const juce::Identifier &key,
+                                          const char *expected) {
+            return juce::File(processor.getResourcePath(key)) ==
+                   juce::File(expected);
+        };
+        if (!matches(Eps16PlusProcessor::romPathKey, argv[2]) ||
+            !matches(Eps16PlusProcessor::kpcPathKey, argv[3]) ||
+            !matches(Eps16PlusProcessor::osDiskPathKey, argv[4])) {
+            std::cerr << "ROM="
+                      << processor.getResourcePath(Eps16PlusProcessor::romPathKey)
+                      << "\nKPC="
+                      << processor.getResourcePath(Eps16PlusProcessor::kpcPathKey)
+                      << "\nOS="
+                      << processor.getResourcePath(Eps16PlusProcessor::osDiskPathKey)
+                      << '\n';
+            return 1;
+        }
+        return 0;
+    }
+    juce::TemporaryFile testRom(".bin");
+    const std::uint8_t testByte = 0;
+    if (!testRom.getFile().replaceWithData(&testByte, sizeof(testByte))) return 1;
+    const auto testRomPath = testRom.getFile().getFullPathName();
+    processor.setResourcePath(Eps16PlusProcessor::romPathKey, testRomPath);
     processor.setResourcePath(Eps16PlusProcessor::mountedDiskPathKey,
                               "/tmp/TEST-DISK.hfe");
     juce::MemoryBlock state;
@@ -17,7 +43,7 @@ int main(int argc, char **argv) {
     restoredProcessor.setStateInformation(state.getData(),
                                            static_cast<int>(state.getSize()));
     if (restoredProcessor.getResourcePath(Eps16PlusProcessor::romPathKey) !=
-        "/tmp/test-rom.bin")
+        testRomPath)
         return 1;
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
     if (!editor || editor->getWidth() != 1350 || editor->getHeight() != 285)
