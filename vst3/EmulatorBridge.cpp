@@ -150,6 +150,15 @@ bool EmulatorBridge::enqueuePanelTransition(std::uint8_t rawMatrixCode,
                     static_cast<std::uint16_t>(pressed ? 1 : 0)});
 }
 
+bool EmulatorBridge::enqueueKeyboardTransition(std::uint8_t note,
+                                               std::uint8_t velocity,
+                                               bool pressed) {
+    if (note < 36 || note > 96 || (pressed && (velocity < 1 || velocity > 127)))
+        return false;
+    return enqueue({ControlType::keyboard, note,
+                    static_cast<std::uint16_t>(pressed ? velocity : 0)});
+}
+
 bool EmulatorBridge::enqueueAnalog(unsigned int channel, std::uint16_t value) {
     if (channel >= 8) return false;
     return enqueue({ControlType::analog, static_cast<std::uint8_t>(channel),
@@ -203,9 +212,14 @@ void EmulatorBridge::dispatchControls(std::uint64_t cycle) {
                               (event.second ? 0x80 : 0x00)), cycle);
             sink.panelByte(0x00, cycle);
             nextPanelTransitionCycle = cycle + panelTransitionSpacingCycles;
-        } else {
+        } else if (event.type == ControlType::analog) {
             hasPendingControl = false;
             sink.analog(event.first, event.second, cycle);
+        } else {
+            hasPendingControl = false;
+            sink.keyboard(event.first,
+                          static_cast<std::uint8_t>(event.second),
+                          event.second != 0, cycle);
         }
     }
 }

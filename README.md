@@ -5,6 +5,15 @@ Macs, built as a resizable VST3 instrument.
 
 ![EPS-16 Plus VST3 panel](docs/images/eps16-plus-vst3-panel.png)
 
+## 1.0.3 Beta
+
+- Added an expandable 61-key on-screen keyboard with click-height velocity,
+  delivered through the original EPS keyboard-controller path.
+- Added hardware-style Pitch and Mod wheels. Pitch returns to centre, Mod
+  remains latched, and both use the original analog controller inputs.
+- Refined the wheel travel and panel fader sizing and spacing while preserving
+  the established compact hardware-inspired GUI.
+
 ## 1.0.2 Beta
 
 - Standard EPS SysEx messages now pass between the VST3 host and the emulated
@@ -42,10 +51,10 @@ menus from text or bypass the sampler's own logic.
 
 ## Download
 
-### [Download EPS-16 Plus Prototype 1.0.2 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-arm64.zip)
+### [Download EPS-16 Plus Prototype 1.0.3 Beta — macOS arm64 VST3](release/EPS-16-Plus-Prototype-arm64.zip)
 
 SHA-256:
-`3e965725ad9ec2b2c18b2fc9e8f6dc23bd594043030fe9d4d0fdf601dd318409`
+`ae63fb2e17ead13b7bbe229ee5551b014d3338c4937bf9ea2b429cef8c4f4c07`
 
 This build requires an Apple Silicon Mac, macOS 11 or newer and a VST3-capable
 DAW. It contains **VST3 only**; no Audio Unit is included.
@@ -127,6 +136,10 @@ Load the plug-in on a MIDI instrument track. MIDI notes 36–96 play the
 virtual 61-key EPS keyboard. Notes outside the physical keyboard range are
 ignored.
 
+The panel's expandable on-screen keyboard includes spring-centred Pitch and
+latched Mod wheels. Both use the original global hardware-controller inputs;
+the original EPS operating system remains responsible for their modulation.
+
 Pitch Wheel and Mod Wheel feed the original global controller inputs. The EPS
 is not an MPE instrument: member-channel MPE expression is deliberately not
 translated into invented EPS functions. Standard Note On/Off remains on the
@@ -183,7 +196,7 @@ project state.
 
 ## Known limitations
 
-- This is a **1.0.2 Beta** build for Apple Silicon macOS only.
+- This is a **1.0.3 Beta** build for Apple Silicon macOS only.
 - VST3 only; no AU is shipped.
 - The bundle is ad-hoc signed but not Apple-notarized. macOS may require
   explicit approval in Privacy & Security.
@@ -194,7 +207,7 @@ project state.
 
 ## Validation
 
-The 1.0.2 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
+The 1.0.3 Beta package is built and checked as an arm64 VST3, ad-hoc signed,
 strictly code-sign verified and ZIP-tested. Automated and original-OS
 regressions cover:
 

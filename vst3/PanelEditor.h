@@ -76,12 +76,47 @@ private:
         juce::String label;
     };
 
+    class PianoKeyboard final : public juce::Component {
+    public:
+        explicit PianoKeyboard(Eps16PlusProcessor &);
+        ~PianoKeyboard() override;
+        void paint(juce::Graphics &) override;
+        void resized() override;
+        void mouseDown(const juce::MouseEvent &) override;
+        void mouseDrag(const juce::MouseEvent &) override;
+        void mouseUp(const juce::MouseEvent &) override;
+        void mouseExit(const juce::MouseEvent &) override;
+        void releaseAllNotes();
+        void releasePerformanceControls();
+
+    private:
+        class PerformanceWheel final : public juce::Slider {
+        public:
+            void paint(juce::Graphics &) override;
+        };
+
+        static bool isBlackKey(int note);
+        static std::uint16_t wheelToAnalog(double value);
+        juce::Rectangle<float> keyboardArea() const;
+        juce::Rectangle<float> keyBounds(int note) const;
+        int noteAt(juce::Point<float> position) const;
+        std::uint8_t velocityAt(int note, float y) const;
+        void pressAt(juce::Point<float> position);
+        void releaseActiveNote();
+
+        Eps16PlusProcessor &processor;
+        PerformanceWheel pitchWheel;
+        PerformanceWheel modWheel;
+        int activeNote{-1};
+    };
+
     PanelButton &addPanelButton(const juce::String &, std::uint8_t,
                                 bool known = true);
     bool updateArrowKey(int keyCode, bool isDown);
     void releaseArrowKeys();
     void openSaveDiskDialog(bool hfeFormat);
     void updateDiskName();
+    void setKeyboardExpanded(bool expanded);
     void timerCallback() override;
 
     Eps16PlusProcessor &owner;
@@ -95,6 +130,9 @@ private:
     DiskButton loadDiskButton{"Load disk image", "LOAD"};
     DiskButton saveDiskButton{"Save disk image", "SAVE"};
     juce::Label diskName;
+    juce::TextButton keyboardToggle{"KEYBOARD"};
+    PianoKeyboard pianoKeyboard;
+    bool keyboardExpanded{};
     std::unique_ptr<juce::FileChooser> diskChooser;
     std::vector<std::unique_ptr<PanelButton>> buttons;
     std::array<PanelButton *, 12> pageButtons{};

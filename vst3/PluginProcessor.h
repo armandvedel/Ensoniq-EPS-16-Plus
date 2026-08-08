@@ -38,6 +38,10 @@ public:
     bool enqueuePanelTransition(std::uint8_t code, bool pressed) {
         return bridge.enqueuePanelTransition(code, pressed);
     }
+    bool enqueueKeyboardTransition(std::uint8_t note, std::uint8_t velocity,
+                                   bool pressed) {
+        return bridge.enqueueKeyboardTransition(note, velocity, pressed);
+    }
     bool enqueueAnalog(unsigned int channel, std::uint16_t value) {
         return bridge.enqueueAnalog(channel, value);
     }

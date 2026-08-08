@@ -588,6 +588,12 @@ void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2) {
         live_performance_midi(status, data1, data2);
 }
 
+void eps16_probe_machine_keyboard(uint8_t note, uint8_t velocity,
+                                  int pressed) {
+    if (!plugin_initialized) return;
+    live_note(note, velocity, pressed != 0);
+}
+
 size_t eps16_probe_machine_midi_bytes(const uint8_t *bytes, size_t size) {
     if (!plugin_initialized || (!bytes && size)) return 0;
     size_t accepted = 0;

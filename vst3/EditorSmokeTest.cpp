@@ -31,6 +31,36 @@ int main(int argc, char **argv) {
         !editor->findChildWithID("load-disk-button") ||
         !editor->findChildWithID("save-disk-button"))
         return 1;
+    auto *keyboardToggle = dynamic_cast<juce::TextButton *>(
+        editor->findChildWithID("keyboard-toggle-button"));
+    auto *pianoKeyboard = editor->findChildWithID("eps-piano-keyboard");
+    auto *pitchWheel = dynamic_cast<juce::Slider *>(
+        pianoKeyboard != nullptr
+            ? pianoKeyboard->findChildWithID("eps-pitch-wheel")
+            : nullptr);
+    auto *modWheel = dynamic_cast<juce::Slider *>(
+        pianoKeyboard != nullptr
+            ? pianoKeyboard->findChildWithID("eps-mod-wheel")
+            : nullptr);
+    if (!keyboardToggle || !pianoKeyboard || !pitchWheel || !modWheel ||
+        pianoKeyboard->isVisible())
+        return 21;
+    keyboardToggle->onClick();
+    if (editor->getWidth() != 1350 || editor->getHeight() != 500 ||
+        !pianoKeyboard->isVisible() || pianoKeyboard->getBounds().isEmpty() ||
+        pitchWheel->getBounds().isEmpty() || modWheel->getBounds().isEmpty() ||
+        pitchWheel->getValue() != 8192.0 || modWheel->getValue() != 0.0)
+        return 22;
+    pitchWheel->setValue(16383.0, juce::sendNotificationSync);
+    modWheel->setValue(16383.0, juce::sendNotificationSync);
+    pitchWheel->onDragEnd();
+    if (pitchWheel->getValue() != 8192.0 || modWheel->getValue() != 16383.0)
+        return 24;
+    keyboardToggle->onClick();
+    if (editor->getWidth() != 1350 || editor->getHeight() != 285 ||
+        pianoKeyboard->isVisible() || pitchWheel->getValue() != 8192.0 ||
+        modWheel->getValue() != 16383.0)
+        return 23;
     auto *diskName = dynamic_cast<juce::Label *>(
         editor->findChildWithID("mounted-disk-name"));
     if (!diskName || diskName->getText() != "DISK: TEST-DISK.hfe" ||
@@ -72,6 +102,7 @@ int main(int argc, char **argv) {
     editor->focusLost(juce::Component::focusChangedDirectly);
     dataEntry->setValue(512, juce::dontSendNotification);
 
+    if (argc == 2) keyboardToggle->onClick();
     const auto snapshot = editor->createComponentSnapshot(editor->getLocalBounds());
     if (!snapshot.isValid() || snapshot.getWidth() != editor->getWidth() ||
         snapshot.getHeight() != editor->getHeight())

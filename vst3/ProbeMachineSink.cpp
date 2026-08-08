@@ -162,6 +162,12 @@ void ProbeMachineSink::midi(std::uint8_t status, std::uint8_t data1,
     if (isReady()) eps16_probe_machine_midi(status, data1, data2);
 }
 
+void ProbeMachineSink::keyboard(std::uint8_t note, std::uint8_t velocity,
+                                bool pressed, std::uint64_t) {
+    if (isReady())
+        eps16_probe_machine_keyboard(note, velocity, pressed ? 1 : 0);
+}
+
 void ProbeMachineSink::midiBytes(const std::uint8_t *bytes, std::size_t size,
                                  std::uint64_t) {
     if (isReady()) eps16_probe_machine_midi_bytes(bytes, size);
