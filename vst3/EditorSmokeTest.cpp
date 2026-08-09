@@ -8,6 +8,38 @@
 int main(int argc, char **argv) {
     const juce::ScopedJuceInitialiser_GUI gui;
     Eps16PlusProcessor processor;
+    if (argc == 6 && std::string(argv[1]) == "--verify-split-resources") {
+        processor.refreshResourcePaths();
+        const auto matches = [&processor](const juce::Identifier &key,
+                                          const char *expected) {
+            return juce::File(processor.getResourcePath(key)) ==
+                   juce::File(expected);
+        };
+        if (!processor.getResourcePath(Eps16PlusProcessor::romPathKey).isEmpty() ||
+            !matches(Eps16PlusProcessor::upperRomPathKey, argv[2]) ||
+            !matches(Eps16PlusProcessor::lowerRomPathKey, argv[3]) ||
+            !matches(Eps16PlusProcessor::kpcPathKey, argv[4]) ||
+            !matches(Eps16PlusProcessor::osDiskPathKey, argv[5])) {
+            std::cerr << "combined="
+                      << processor.getResourcePath(Eps16PlusProcessor::romPathKey)
+                      << "\nupper="
+                      << processor.getResourcePath(Eps16PlusProcessor::upperRomPathKey)
+                      << "\nlower="
+                      << processor.getResourcePath(Eps16PlusProcessor::lowerRomPathKey)
+                      << "\nKPC="
+                      << processor.getResourcePath(Eps16PlusProcessor::kpcPathKey)
+                      << "\nOS="
+                      << processor.getResourcePath(Eps16PlusProcessor::osDiskPathKey)
+                      << '\n';
+            return 1;
+        }
+        processor.prepareToPlay(48000.0, 512);
+        if (!processor.machineReady()) {
+            std::cerr << processor.machineStatus() << '\n';
+            return 1;
+        }
+        return 0;
+    }
     if (argc == 5 && std::string(argv[1]) == "--verify-resources") {
         processor.refreshResourcePaths();
         const auto matches = [&processor](const juce::Identifier &key,

@@ -20,7 +20,8 @@ public:
     ~ProbeMachineSink() override;
     bool beginBlock() override;
     void endBlock() override;
-    void configure(std::string romPath, std::string kpcPath,
+    void configure(std::string romPath, std::string upperRomPath,
+                   std::string lowerRomPath, std::string kpcPath,
                    std::string osDiskPath);
     bool insertDisk(const std::string &path, const std::string &label);
     bool createBlankDisk();
@@ -77,6 +78,8 @@ private:
     void discardQueuedAudio();
 
     std::string rom;
+    std::string upperRom;
+    std::string lowerRom;
     std::string kpc;
     std::string disk;
     mutable std::mutex statusMutex;

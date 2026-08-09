@@ -21,6 +21,11 @@ void eps16_probe_machine_end(Eps16ProbeMachine *machine);
 int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
                                    const char *os_disk_path,
                                    char *error, size_t error_size);
+int eps16_probe_machine_initialize_split_rom(const char *upper_rom_path,
+                                             const char *lower_rom_path,
+                                             const char *kpc_path,
+                                             const char *os_disk_path,
+                                             char *error, size_t error_size);
 int eps16_probe_machine_insert_disk(const char *disk_path,
                                     char *error, size_t error_size);
 int eps16_probe_machine_create_blank_disk(char *error, size_t error_size);

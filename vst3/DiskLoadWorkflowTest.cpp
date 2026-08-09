@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     eps16::vst3::ProbeMachineSink machine;
-    machine.configure(argv[1], argv[2], argv[3]);
+    machine.configure(argv[1], {}, {}, argv[2], argv[3]);
     eps16::vst3::EmulatorBridge bridge(machine);
     if (!bridge.prepare(sampleRate) || !machine.isReady()) return 1;
     runFor(bridge, 22.0);

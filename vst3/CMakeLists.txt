@@ -157,6 +157,7 @@ target_link_libraries(Eps16Plus PRIVATE
   eps16_vst3_bridge
   eps16_probe_machine
   juce::juce_audio_processors
+  juce::juce_cryptography
   juce::juce_gui_basics
   juce::juce_recommended_config_flags
   juce::juce_recommended_warning_flags

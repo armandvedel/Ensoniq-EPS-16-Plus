@@ -77,6 +77,8 @@ public:
     }
 
     static const juce::Identifier romPathKey;
+    static const juce::Identifier upperRomPathKey;
+    static const juce::Identifier lowerRomPathKey;
     static const juce::Identifier kpcPathKey;
     static const juce::Identifier osDiskPathKey;
     static const juce::Identifier mountedDiskPathKey;

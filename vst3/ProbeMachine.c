@@ -377,19 +377,9 @@ static void plugin_render_audio(uint64_t elapsed_cycles, uint64_t end_cycle) {
     }
 }
 
-int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
-                                   const char *os_disk_path,
-                                   char *error, size_t error_size) {
-    if (plugin_initialized) return 1;
-    if (!rom_path || !*rom_path || !kpc_path || !*kpc_path ||
-        !os_disk_path || !*os_disk_path) {
-        plugin_error(error, error_size, "ROM, KPC ROM and OS disk are required");
-        return 0;
-    }
-    if (!load_rom(rom_path)) {
-        plugin_error(error, error_size, "combined EPS ROM must be exactly 128 KiB");
-        return 0;
-    }
+static int plugin_initialize_loaded_rom(const char *kpc_path,
+                                        const char *os_disk_path,
+                                        char *error, size_t error_size) {
     if (!load_disk(os_disk_path)) {
         plugin_error(error, error_size, "EPS OS disk could not be decoded");
         return 0;
@@ -425,6 +415,45 @@ int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
     plugin_initialized = 1;
     if (error && error_size) error[0] = '\0';
     return 1;
+}
+
+int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
+                                   const char *os_disk_path,
+                                   char *error, size_t error_size) {
+    if (plugin_initialized) return 1;
+    if (!rom_path || !*rom_path || !kpc_path || !*kpc_path ||
+        !os_disk_path || !*os_disk_path) {
+        plugin_error(error, error_size, "ROM, KPC ROM and OS disk are required");
+        return 0;
+    }
+    if (!load_rom(rom_path)) {
+        plugin_error(error, error_size, "combined EPS ROM must be exactly 128 KiB");
+        return 0;
+    }
+    return plugin_initialize_loaded_rom(kpc_path, os_disk_path,
+                                        error, error_size);
+}
+
+int eps16_probe_machine_initialize_split_rom(const char *upper_rom_path,
+                                             const char *lower_rom_path,
+                                             const char *kpc_path,
+                                             const char *os_disk_path,
+                                             char *error, size_t error_size) {
+    if (plugin_initialized) return 1;
+    if (!upper_rom_path || !*upper_rom_path ||
+        !lower_rom_path || !*lower_rom_path ||
+        !kpc_path || !*kpc_path || !os_disk_path || !*os_disk_path) {
+        plugin_error(error, error_size,
+                     "U28, U27, KPC ROM and OS disk are required");
+        return 0;
+    }
+    if (!load_split_rom(upper_rom_path, lower_rom_path)) {
+        plugin_error(error, error_size,
+                     "EPS 1.00F U28/U27 ROM pair could not be combined");
+        return 0;
+    }
+    return plugin_initialize_loaded_rom(kpc_path, os_disk_path,
+                                        error, error_size);
 }
 
 int eps16_probe_machine_insert_disk(const char *disk_path,

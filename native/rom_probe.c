@@ -2472,6 +2472,64 @@ static int load_rom(const char *path) {
     return 1;
 }
 
+static int load_split_rom(const char *upper_path, const char *lower_path) {
+    const size_t chip_size = ROM_SIZE / 2;
+    uint8_t *upper = (uint8_t *)malloc(chip_size);
+    uint8_t *lower = (uint8_t *)malloc(chip_size);
+    if (!upper || !lower) {
+        fprintf(stderr, "could not allocate split ROM buffers\n");
+        free(upper);
+        free(lower);
+        return 0;
+    }
+
+    const char *paths[2] = {upper_path, lower_path};
+    uint8_t *chips[2] = {upper, lower};
+    for (size_t chip = 0; chip < 2; ++chip) {
+        FILE *input = fopen(paths[chip], "rb");
+        if (!input) {
+            perror(paths[chip]);
+            free(upper);
+            free(lower);
+            return 0;
+        }
+        size_t bytes = fread(chips[chip], 1, chip_size, input);
+        int extra = fgetc(input);
+        fclose(input);
+        if (bytes != chip_size || extra != EOF) {
+            fprintf(stderr,
+                    "expected exactly %zu bytes in split ROM, got %zu or more\n",
+                    chip_size, bytes);
+            free(upper);
+            free(lower);
+            return 0;
+        }
+    }
+
+    for (size_t index = 0; index < chip_size; ++index) {
+        rom[index * 2] = upper[index];
+        rom[index * 2 + 1] = lower[index];
+    }
+    free(upper);
+    free(lower);
+
+    const uint32_t initial_sp = ((uint32_t)rom[0] << 24) |
+                                ((uint32_t)rom[1] << 16) |
+                                ((uint32_t)rom[2] << 8) | rom[3];
+    const uint32_t reset_pc = ((uint32_t)rom[4] << 24) |
+                              ((uint32_t)rom[5] << 16) |
+                              ((uint32_t)rom[6] << 8) | rom[7];
+    if ((initial_sp & 1U) || reset_pc < ROM_BASE ||
+        reset_pc >= ROM_BASE + ROM_SIZE) {
+        fprintf(stderr,
+                "split ROM has invalid vectors (SP=%08x PC=%08x); "
+                "U28/U27 may be reversed\n",
+                initial_sp, reset_pc);
+        return 0;
+    }
+    return 1;
+}
+
 static int load_disk(const char *path) {
     char error[256];
     Eps16DiskFormat format;

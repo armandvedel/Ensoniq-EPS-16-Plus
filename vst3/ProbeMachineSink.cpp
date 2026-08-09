@@ -43,9 +43,14 @@ void ProbeMachineSink::endBlock() {
     blockActive = false;
 }
 
-void ProbeMachineSink::configure(std::string romPath, std::string kpcPath,
+void ProbeMachineSink::configure(std::string romPath,
+                                 std::string upperRomPath,
+                                 std::string lowerRomPath,
+                                 std::string kpcPath,
                                  std::string osDiskPath) {
     rom = std::move(romPath);
+    upperRom = std::move(upperRomPath);
+    lowerRom = std::move(lowerRomPath);
     kpc = std::move(kpcPath);
     disk = std::move(osDiskPath);
 }
@@ -116,8 +121,13 @@ void ProbeMachineSink::prepare(double dawSampleRate) {
         return;
     }
     char error[256]{};
-    if (eps16_probe_machine_initialize(rom.c_str(), kpc.c_str(), disk.c_str(),
-                                       error, sizeof(error))) {
+    const bool initialized = !rom.empty()
+        ? eps16_probe_machine_initialize(rom.c_str(), kpc.c_str(), disk.c_str(),
+                                         error, sizeof(error)) != 0
+        : eps16_probe_machine_initialize_split_rom(
+              upperRom.c_str(), lowerRom.c_str(), kpc.c_str(), disk.c_str(),
+              error, sizeof(error)) != 0;
+    if (initialized) {
         eps16_probe_machine_sampling_input_rate(dawSampleRate);
         cycleBase = eps16_probe_machine_cycles();
         discardQueuedAudio();

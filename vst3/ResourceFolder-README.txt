@@ -1,4 +1,4 @@
-EPS-16 Plus Prototype 1.0.5 external files
+EPS-16 Plus Prototype 1.0.6 external files
 ==========================================
 
 The universal VST3 supports Intel macOS 10.13 or newer and Apple Silicon
@@ -20,6 +20,12 @@ Preferred names:
   eps16plus-rom.bin   combined 128 KiB U28/U27 main ROM
   eps16plus-kpc.bin   32 KiB KPC 2.33 EPROM
   EPS130OS.img        819,200-byte logical OS disk
+
+Instead of eps16plus-rom.bin, the two unchanged 64 KiB EPS-16 Plus 1.00F
+chips may be placed here together. Their filenames do not matter: the plug-in
+identifies U28 (upper/high byte) and U27 (lower/low byte) by SHA-256 and
+interleaves them in memory without creating another ROM file. Unknown or
+modified split ROMs are not accepted.
 
 EPS130OS.hfe is also accepted. The original KPC filename
 "Ensoniq EPS KPC2 v2.33 27c256.BIN" is recognized without renaming. If a

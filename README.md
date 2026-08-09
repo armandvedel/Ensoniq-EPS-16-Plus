@@ -5,6 +5,15 @@ Apple Silicon Macs, built as a resizable VST3 instrument.
 
 ![EPS-16 Plus VST3 panel and keyboard](docs/images/eps16-plus-vst3-panel-keyboard.png)
 
+## 1.0.6
+
+- Added direct support for the verified EPS-16 Plus 1.00F split main ROMs.
+  Place the unchanged 64 KiB U28/upper and U27/lower dumps together in
+  `EPS_files`; the plug-in identifies them by SHA-256 and interleaves them in
+  memory without creating or modifying a ROM file.
+- Existing combined 128 KiB `eps16plus-rom.bin` installations remain fully
+  compatible and continue to take precedence when present.
+
 ## 1.0.5
 
 - Fixed external-file discovery when the VST3 is installed in the user folder
@@ -67,10 +76,10 @@ menus from text or bypass the sampler's own logic.
 
 ## Download
 
-### [Download EPS-16 Plus Prototype 1.0.5 — macOS Universal VST3](release/EPS-16-Plus-Prototype-macOS-universal.zip)
+### [Download EPS-16 Plus Prototype 1.0.6 — macOS Universal VST3](release/EPS-16-Plus-Prototype-macOS-universal.zip)
 
 SHA-256:
-`742b7191b939f413fbf5a34813157c61663bbc516452a10c954d32aef9801524`
+`5f070e66089d4bb477dd6e4e36f06adeaf2a3ac482bd4722a4d4a81648c673ad`
 
 The universal package supports Intel Macs with macOS 10.13 High Sierra or
 newer and Apple Silicon Macs with macOS 11 or newer. It requires a VST3-capable
@@ -127,6 +136,15 @@ DAW and contains **VST3 only**; no Audio Unit is included.
    eps16plus-rom.bin   combined 128 KiB U28/U27 main ROM
    eps16plus-kpc.bin   32 KiB KPC 2.33 EPROM
    EPS130OS.img        819,200-byte EPS-16 Plus OS disk
+   ```
+
+   Alternatively, the two unchanged EPS-16 Plus 1.00F ROM dumps may be placed
+   in the same folder. The plug-in identifies them by checksum and interleaves
+   them in memory; their filenames do not matter:
+
+   ```text
+   eps16plus-100f-upper.u28   64 KiB U28 high-byte ROM
+   eps16plus-100f-lower.u27   64 KiB U27 low-byte ROM
    ```
 
    `EPS130OS.hfe` is also accepted. The original filename
@@ -215,7 +233,7 @@ project state.
 
 ## Known limitations
 
-- This is the **1.0.5** release for Intel macOS 10.13+ and Apple Silicon
+- This is the **1.0.6** release for Intel macOS 10.13+ and Apple Silicon
   macOS 11+.
 - VST3 only; no AU is shipped.
 - The bundle is ad-hoc signed but not Apple-notarized. Use the included
@@ -228,7 +246,7 @@ project state.
 
 ## Validation
 
-The 1.0.5 universal package contains checked x86_64 and arm64 slices with
+The 1.0.6 universal package contains checked x86_64 and arm64 slices with
 deployment targets macOS 10.13 and macOS 11 respectively. It is ad-hoc signed,
 strictly code-sign verified and ZIP-tested. Automated and original-OS
 regressions cover:
