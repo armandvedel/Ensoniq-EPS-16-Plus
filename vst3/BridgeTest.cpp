@@ -28,12 +28,6 @@ struct CaptureSink final : EmulatorSink {
         lastMidiData1 = data1;
         lastMidiData2 = data2;
     }
-    void midi(std::uint8_t status, std::uint8_t data1, std::uint8_t data2,
-              std::uint64_t cycle) override {
-        midiMessages.push_back({status, cycle});
-        lastMidiData1 = data1;
-        lastMidiData2 = data2;
-    }
 
     void keyboard(std::uint8_t note, std::uint8_t velocity, bool pressed,
                   std::uint64_t) override {
