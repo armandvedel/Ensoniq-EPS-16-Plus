@@ -20,7 +20,8 @@ public:
     ~ProbeMachineSink() override;
     bool beginBlock() override;
     void endBlock() override;
-    void configure(std::string romPath, std::string kpcPath,
+    void configure(std::string romPath, std::string upperRomPath,
+                   std::string lowerRomPath, std::string kpcPath,
                    std::string osDiskPath);
     bool insertDisk(const std::string &path, const std::string &label);
     bool createBlankDisk();
@@ -30,6 +31,8 @@ public:
     void runUntil(std::uint64_t absoluteCpuCycle) override;
     void midi(std::uint8_t status, std::uint8_t data1,
               std::uint8_t data2, std::uint64_t cycle) override;
+    void keyboard(std::uint8_t note, std::uint8_t velocity, bool pressed,
+                  std::uint64_t cycle) override;
     void midiBytes(const std::uint8_t *bytes, std::size_t size,
                    std::uint64_t cycle) override;
     std::size_t drainMidiOutput(std::uint8_t *bytes,
@@ -75,6 +78,8 @@ private:
     void discardQueuedAudio();
 
     std::string rom;
+    std::string upperRom;
+    std::string lowerRom;
     std::string kpc;
     std::string disk;
     mutable std::mutex statusMutex;

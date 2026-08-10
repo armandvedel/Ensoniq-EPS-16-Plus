@@ -35,6 +35,8 @@ public:
     virtual void runUntil(std::uint64_t absoluteCpuCycle) = 0;
     virtual void midi(std::uint8_t status, std::uint8_t data1,
                       std::uint8_t data2, std::uint64_t cycle) = 0;
+    virtual void keyboard(std::uint8_t note, std::uint8_t velocity,
+                          bool pressed, std::uint64_t cycle) = 0;
     virtual void midiBytes(const std::uint8_t *bytes, std::size_t size,
                            std::uint64_t cycle) = 0;
     virtual std::size_t drainMidiOutput(std::uint8_t *bytes,
@@ -52,6 +54,7 @@ public:
     void prepare(double) override {}
     void runUntil(std::uint64_t) override {}
     void midi(std::uint8_t, std::uint8_t, std::uint8_t, std::uint64_t) override {}
+    void keyboard(std::uint8_t, std::uint8_t, bool, std::uint64_t) override {}
     void midiBytes(const std::uint8_t *, std::size_t, std::uint64_t) override {}
     std::size_t drainMidiOutput(std::uint8_t *, std::size_t) override {
         return 0;
@@ -105,6 +108,8 @@ public:
     bool prepare(double sampleRate);
     bool resetTimeline();
     bool enqueuePanelTransition(std::uint8_t rawMatrixCode, bool pressed);
+    bool enqueueKeyboardTransition(std::uint8_t note, std::uint8_t velocity,
+                                   bool pressed);
     bool enqueueAnalog(unsigned int channel, std::uint16_t value);
     bool enqueueSysEx(const std::uint8_t *bytes, std::size_t size);
     void process(const float *inputLeft, const float *inputRight,
@@ -123,7 +128,7 @@ public:
 
 private:
     static constexpr std::uint64_t panelTransitionSpacingCycles = 500000;
-    enum class ControlType : std::uint8_t { panel, analog };
+    enum class ControlType : std::uint8_t { panel, analog, keyboard };
     struct ControlEvent {
         ControlType type{};
         std::uint8_t first{};

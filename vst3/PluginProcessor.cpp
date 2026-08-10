@@ -1,6 +1,8 @@
 #include "PluginProcessor.h"
 #include "PanelEditor.h"
 
+#include <juce_cryptography/juce_cryptography.h>
+
 #include <algorithm>
 #include <dlfcn.h>
 
@@ -36,9 +38,42 @@ juce::File firstFileWithSize(const juce::File &directory,
         if (file.getSize() == expectedSize) return file;
     return {};
 }
+
+struct SplitRomFiles {
+    juce::File upper;
+    juce::File lower;
+};
+
+constexpr auto upperRomSha256 =
+    "91ac82ef131008bd714c3d831d22a374fce33695e899bcee1ded1410379394d0";
+constexpr auto lowerRomSha256 =
+    "1906e9929fe310bc08eb430ed5e83097542cabc8fd6cb57bd4ac7659847d1674";
+
+bool isKnownSplitRom(const juce::File &upper, const juce::File &lower) {
+    return upper.existsAsFile() && lower.existsAsFile() &&
+           upper.getSize() == 65536 && lower.getSize() == 65536 &&
+           juce::SHA256(upper).toHexString() == upperRomSha256 &&
+           juce::SHA256(lower).toHexString() == lowerRomSha256;
+}
+
+SplitRomFiles findKnownSplitRom(const juce::File &directory) {
+    SplitRomFiles result;
+    auto files = directory.findChildFiles(juce::File::findFiles, false, "*");
+    files.sort();
+    for (const auto &file : files) {
+        if (file.getSize() != 65536) continue;
+        const auto digest = juce::SHA256(file).toHexString();
+        if (digest == upperRomSha256) result.upper = file;
+        if (digest == lowerRomSha256) result.lower = file;
+        if (result.upper.existsAsFile() && result.lower.existsAsFile()) break;
+    }
+    return result;
+}
 } // namespace
 
 const juce::Identifier Eps16PlusProcessor::romPathKey{"combinedRomPath"};
+const juce::Identifier Eps16PlusProcessor::upperRomPathKey{"upperRomPath"};
+const juce::Identifier Eps16PlusProcessor::lowerRomPathKey{"lowerRomPath"};
 const juce::Identifier Eps16PlusProcessor::kpcPathKey{"kpcRomPath"};
 const juce::Identifier Eps16PlusProcessor::osDiskPathKey{"osDiskPath"};
 const juce::Identifier Eps16PlusProcessor::mountedDiskPathKey{"mountedDiskPath"};
@@ -74,6 +109,8 @@ Eps16PlusProcessor::Eps16PlusProcessor()
 void Eps16PlusProcessor::prepareToPlay(double sampleRate, int) {
     refreshResourcePaths();
     machineSink.configure(getResourcePath(romPathKey).toStdString(),
+                          getResourcePath(upperRomPathKey).toStdString(),
+                          getResourcePath(lowerRomPathKey).toStdString(),
                           getResourcePath(kpcPathKey).toStdString(),
                           getResourcePath(osDiskPathKey).toStdString());
     bridge.prepare(sampleRate);
@@ -357,32 +394,83 @@ juce::File Eps16PlusProcessor::defaultResourceDirectory() {
 }
 
 void Eps16PlusProcessor::refreshResourcePaths() {
-    const auto directory = defaultResourceDirectory();
-    if (!directory.isDirectory()) return;
+    juce::Array<juce::File> directories;
+    const auto addDirectory = [&directories](const juce::File &directory) {
+        if (directory.isDirectory() && !directories.contains(directory))
+            directories.add(directory);
+    };
+    addDirectory(defaultResourceDirectory());
+    addDirectory(juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                     .getChildFile("Library/Audio/Plug-Ins/VST3/EPS_files"));
+    addDirectory(juce::File("/Library/Audio/Plug-Ins/VST3/EPS_files"));
+    if (directories.isEmpty()) return;
 
-    auto discover = [this, &directory](const juce::Identifier &key,
-                                       std::initializer_list<const char *> names,
-                                       std::int64_t fallbackSize,
-                                       const juce::String &fallbackPattern) {
+    auto discover = [this, &directories](
+                        const juce::Identifier &key,
+                        std::initializer_list<const char *> names,
+                        std::int64_t fallbackSize,
+                        const juce::String &fallbackPattern) {
         const juce::File selected(getResourcePath(key));
         if (selected.existsAsFile()) return;
-        auto found = firstExisting(directory, names);
-        if (!found.existsAsFile() && fallbackSize > 0)
-            found = firstFileWithSize(directory, fallbackPattern, fallbackSize);
-        if (found.existsAsFile()) setResourcePath(key, found.getFullPathName());
+        for (const auto &directory : directories) {
+            const auto found = firstExisting(directory, names);
+            if (found.existsAsFile()) {
+                setResourcePath(key, found.getFullPathName());
+                return;
+            }
+        }
+        if (fallbackSize <= 0) return;
+        for (const auto &directory : directories) {
+            const auto found = firstFileWithSize(directory, fallbackPattern,
+                                                 fallbackSize);
+            if (found.existsAsFile()) {
+                setResourcePath(key, found.getFullPathName());
+                return;
+            }
+        }
     };
 
-    discover(romPathKey, {"eps16plus-rom.bin"}, 131072, "*.bin;*.rom");
+    const juce::File selectedRom(getResourcePath(romPathKey));
+    const juce::File selectedUpper(getResourcePath(upperRomPathKey));
+    const juce::File selectedLower(getResourcePath(lowerRomPathKey));
+    if (!selectedRom.existsAsFile() &&
+        isKnownSplitRom(selectedUpper, selectedLower)) {
+        setResourcePath(romPathKey, {});
+    } else if (!selectedRom.existsAsFile()) {
+        setResourcePath(upperRomPathKey, {});
+        setResourcePath(lowerRomPathKey, {});
+        for (const auto &directory : directories) {
+            auto combined = firstExisting(directory, {"eps16plus-rom.bin"});
+            if (!combined.existsAsFile())
+                combined = firstFileWithSize(directory, "*.bin;*.rom", 131072);
+            if (combined.existsAsFile()) {
+                setResourcePath(romPathKey, combined.getFullPathName());
+                break;
+            }
+            const auto split = findKnownSplitRom(directory);
+            if (!split.upper.existsAsFile() || !split.lower.existsAsFile())
+                continue;
+            setResourcePath(romPathKey, {});
+            setResourcePath(upperRomPathKey, split.upper.getFullPathName());
+            setResourcePath(lowerRomPathKey, split.lower.getFullPathName());
+            break;
+        }
+    }
     discover(kpcPathKey,
              {"eps16plus-kpc.bin", "Ensoniq EPS KPC2 v2.33 27c256.BIN"},
              32768, "*.bin;*.rom");
     discover(osDiskPathKey, {"EPS130OS.img", "EPS130OS.hfe"}, 819200, "*.img");
     if (!juce::File(getResourcePath(osDiskPathKey)).existsAsFile()) {
-        auto hfeFiles = directory.findChildFiles(juce::File::findFiles, false,
-                                                 "*.hfe;*.HFE");
-        hfeFiles.sort();
-        if (!hfeFiles.isEmpty())
-            setResourcePath(osDiskPathKey, hfeFiles.getFirst().getFullPathName());
+        for (const auto &directory : directories) {
+            auto hfeFiles = directory.findChildFiles(juce::File::findFiles,
+                                                      false, "*.hfe;*.HFE");
+            hfeFiles.sort();
+            if (!hfeFiles.isEmpty()) {
+                setResourcePath(osDiskPathKey,
+                                hfeFiles.getFirst().getFullPathName());
+                break;
+            }
+        }
     }
 }
 

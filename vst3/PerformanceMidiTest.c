@@ -30,6 +30,21 @@ int main(int argc, char **argv) {
     eps16_probe_machine_run_until(220000000);
 
     int failed = 0;
+    const size_t keyboard_before = eps16_probe_machine_panel_rx_consumed();
+    eps16_probe_machine_keyboard(36, 127, 1);
+    run_for(20000000);
+    const size_t keyboard_after_note =
+        eps16_probe_machine_panel_rx_consumed();
+    eps16_probe_machine_keyboard(36, 1, 0);
+    run_for(20000000);
+    const size_t keyboard_after_release =
+        eps16_probe_machine_panel_rx_consumed();
+    printf("gui_keyboard_bytes=%zu/%zu/%zu\n", keyboard_before,
+           keyboard_after_note, keyboard_after_release);
+    if (keyboard_after_note != keyboard_before + 2 ||
+        keyboard_after_release != keyboard_after_note + 2)
+        failed = 1;
+
     eps16_probe_machine_midi(0xe0, 0x00, 0x00);
     if (!expect_analog(0, 1023)) failed = 1;
     eps16_probe_machine_midi(0xe0, 0x00, 0x40);

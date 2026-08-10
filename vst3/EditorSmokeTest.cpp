@@ -2,12 +2,70 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <iostream>
 #include <memory>
 
 int main(int argc, char **argv) {
     const juce::ScopedJuceInitialiser_GUI gui;
     Eps16PlusProcessor processor;
-    processor.setResourcePath(Eps16PlusProcessor::romPathKey, "/tmp/test-rom.bin");
+    if (argc == 6 && std::string(argv[1]) == "--verify-split-resources") {
+        processor.refreshResourcePaths();
+        const auto matches = [&processor](const juce::Identifier &key,
+                                          const char *expected) {
+            return juce::File(processor.getResourcePath(key)) ==
+                   juce::File(expected);
+        };
+        if (!processor.getResourcePath(Eps16PlusProcessor::romPathKey).isEmpty() ||
+            !matches(Eps16PlusProcessor::upperRomPathKey, argv[2]) ||
+            !matches(Eps16PlusProcessor::lowerRomPathKey, argv[3]) ||
+            !matches(Eps16PlusProcessor::kpcPathKey, argv[4]) ||
+            !matches(Eps16PlusProcessor::osDiskPathKey, argv[5])) {
+            std::cerr << "combined="
+                      << processor.getResourcePath(Eps16PlusProcessor::romPathKey)
+                      << "\nupper="
+                      << processor.getResourcePath(Eps16PlusProcessor::upperRomPathKey)
+                      << "\nlower="
+                      << processor.getResourcePath(Eps16PlusProcessor::lowerRomPathKey)
+                      << "\nKPC="
+                      << processor.getResourcePath(Eps16PlusProcessor::kpcPathKey)
+                      << "\nOS="
+                      << processor.getResourcePath(Eps16PlusProcessor::osDiskPathKey)
+                      << '\n';
+            return 1;
+        }
+        processor.prepareToPlay(48000.0, 512);
+        if (!processor.machineReady()) {
+            std::cerr << processor.machineStatus() << '\n';
+            return 1;
+        }
+        return 0;
+    }
+    if (argc == 5 && std::string(argv[1]) == "--verify-resources") {
+        processor.refreshResourcePaths();
+        const auto matches = [&processor](const juce::Identifier &key,
+                                          const char *expected) {
+            return juce::File(processor.getResourcePath(key)) ==
+                   juce::File(expected);
+        };
+        if (!matches(Eps16PlusProcessor::romPathKey, argv[2]) ||
+            !matches(Eps16PlusProcessor::kpcPathKey, argv[3]) ||
+            !matches(Eps16PlusProcessor::osDiskPathKey, argv[4])) {
+            std::cerr << "ROM="
+                      << processor.getResourcePath(Eps16PlusProcessor::romPathKey)
+                      << "\nKPC="
+                      << processor.getResourcePath(Eps16PlusProcessor::kpcPathKey)
+                      << "\nOS="
+                      << processor.getResourcePath(Eps16PlusProcessor::osDiskPathKey)
+                      << '\n';
+            return 1;
+        }
+        return 0;
+    }
+    juce::TemporaryFile testRom(".bin");
+    const std::uint8_t testByte = 0;
+    if (!testRom.getFile().replaceWithData(&testByte, sizeof(testByte))) return 1;
+    const auto testRomPath = testRom.getFile().getFullPathName();
+    processor.setResourcePath(Eps16PlusProcessor::romPathKey, testRomPath);
     processor.setResourcePath(Eps16PlusProcessor::mountedDiskPathKey,
                               "/tmp/TEST-DISK.hfe");
     juce::MemoryBlock state;
@@ -17,7 +75,7 @@ int main(int argc, char **argv) {
     restoredProcessor.setStateInformation(state.getData(),
                                            static_cast<int>(state.getSize()));
     if (restoredProcessor.getResourcePath(Eps16PlusProcessor::romPathKey) !=
-        "/tmp/test-rom.bin")
+        testRomPath)
         return 1;
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
     if (!editor || editor->getWidth() != 1350 || editor->getHeight() != 285)
@@ -31,6 +89,36 @@ int main(int argc, char **argv) {
         !editor->findChildWithID("load-disk-button") ||
         !editor->findChildWithID("save-disk-button"))
         return 1;
+    auto *keyboardToggle = dynamic_cast<juce::TextButton *>(
+        editor->findChildWithID("keyboard-toggle-button"));
+    auto *pianoKeyboard = editor->findChildWithID("eps-piano-keyboard");
+    auto *pitchWheel = dynamic_cast<juce::Slider *>(
+        pianoKeyboard != nullptr
+            ? pianoKeyboard->findChildWithID("eps-pitch-wheel")
+            : nullptr);
+    auto *modWheel = dynamic_cast<juce::Slider *>(
+        pianoKeyboard != nullptr
+            ? pianoKeyboard->findChildWithID("eps-mod-wheel")
+            : nullptr);
+    if (!keyboardToggle || !pianoKeyboard || !pitchWheel || !modWheel ||
+        pianoKeyboard->isVisible())
+        return 21;
+    keyboardToggle->onClick();
+    if (editor->getWidth() != 1350 || editor->getHeight() != 500 ||
+        !pianoKeyboard->isVisible() || pianoKeyboard->getBounds().isEmpty() ||
+        pitchWheel->getBounds().isEmpty() || modWheel->getBounds().isEmpty() ||
+        pitchWheel->getValue() != 8192.0 || modWheel->getValue() != 0.0)
+        return 22;
+    pitchWheel->setValue(16383.0, juce::sendNotificationSync);
+    modWheel->setValue(16383.0, juce::sendNotificationSync);
+    pitchWheel->onDragEnd();
+    if (pitchWheel->getValue() != 8192.0 || modWheel->getValue() != 16383.0)
+        return 24;
+    keyboardToggle->onClick();
+    if (editor->getWidth() != 1350 || editor->getHeight() != 285 ||
+        pianoKeyboard->isVisible() || pitchWheel->getValue() != 8192.0 ||
+        modWheel->getValue() != 16383.0)
+        return 23;
     auto *diskName = dynamic_cast<juce::Label *>(
         editor->findChildWithID("mounted-disk-name"));
     if (!diskName || diskName->getText() != "DISK: TEST-DISK.hfe" ||
@@ -72,6 +160,7 @@ int main(int argc, char **argv) {
     editor->focusLost(juce::Component::focusChangedDirectly);
     dataEntry->setValue(512, juce::dontSendNotification);
 
+    if (argc == 2) keyboardToggle->onClick();
     const auto snapshot = editor->createComponentSnapshot(editor->getLocalBounds());
     if (!snapshot.isValid() || snapshot.getWidth() != editor->getWidth() ||
         snapshot.getHeight() != editor->getHeight())

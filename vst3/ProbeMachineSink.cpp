@@ -43,9 +43,14 @@ void ProbeMachineSink::endBlock() {
     blockActive = false;
 }
 
-void ProbeMachineSink::configure(std::string romPath, std::string kpcPath,
+void ProbeMachineSink::configure(std::string romPath,
+                                 std::string upperRomPath,
+                                 std::string lowerRomPath,
+                                 std::string kpcPath,
                                  std::string osDiskPath) {
     rom = std::move(romPath);
+    upperRom = std::move(upperRomPath);
+    lowerRom = std::move(lowerRomPath);
     kpc = std::move(kpcPath);
     disk = std::move(osDiskPath);
 }
@@ -116,8 +121,13 @@ void ProbeMachineSink::prepare(double dawSampleRate) {
         return;
     }
     char error[256]{};
-    if (eps16_probe_machine_initialize(rom.c_str(), kpc.c_str(), disk.c_str(),
-                                       error, sizeof(error))) {
+    const bool initialized = !rom.empty()
+        ? eps16_probe_machine_initialize(rom.c_str(), kpc.c_str(), disk.c_str(),
+                                         error, sizeof(error)) != 0
+        : eps16_probe_machine_initialize_split_rom(
+              upperRom.c_str(), lowerRom.c_str(), kpc.c_str(), disk.c_str(),
+              error, sizeof(error)) != 0;
+    if (initialized) {
         eps16_probe_machine_sampling_input_rate(dawSampleRate);
         cycleBase = eps16_probe_machine_cycles();
         discardQueuedAudio();
@@ -160,6 +170,12 @@ void ProbeMachineSink::runUntil(std::uint64_t absoluteCpuCycle) {
 void ProbeMachineSink::midi(std::uint8_t status, std::uint8_t data1,
                             std::uint8_t data2, std::uint64_t) {
     if (isReady()) eps16_probe_machine_midi(status, data1, data2);
+}
+
+void ProbeMachineSink::keyboard(std::uint8_t note, std::uint8_t velocity,
+                                bool pressed, std::uint64_t) {
+    if (isReady())
+        eps16_probe_machine_keyboard(note, velocity, pressed ? 1 : 0);
 }
 
 void ProbeMachineSink::midiBytes(const std::uint8_t *bytes, std::size_t size,

@@ -8,6 +8,8 @@
 namespace {
 constexpr int rackWidth = 1350;
 constexpr int rackHeight = 285;
+constexpr int keyboardHeight = 215;
+constexpr int expandedRackHeight = rackHeight + keyboardHeight;
 const juce::Colour panelColour{0xff3b3d3c};
 const juce::Colour buttonColour{0xff252625};
 const juce::Colour displayColour{0xff55eaff};
@@ -492,8 +494,253 @@ void Eps16PanelEditor::DiskButton::paintButton(juce::Graphics &graphics,
     graphics.drawText(label, labelArea, juce::Justification::centred, false);
 }
 
+Eps16PanelEditor::PianoKeyboard::PianoKeyboard(
+    Eps16PlusProcessor &processorToUse)
+    : processor(processorToUse) {
+    setComponentID("eps-piano-keyboard");
+    setMouseClickGrabsKeyboardFocus(false);
+
+    auto configureWheel = [this](juce::Slider &wheel,
+                                 const juce::String &componentID) {
+        wheel.setComponentID(componentID);
+        wheel.setSliderStyle(juce::Slider::LinearVertical);
+        wheel.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        wheel.setRange(0.0, 16383.0, 1.0);
+        wheel.setMouseDragSensitivity(180);
+        wheel.setScrollWheelEnabled(false);
+        wheel.setMouseClickGrabsKeyboardFocus(false);
+        addAndMakeVisible(wheel);
+    };
+    configureWheel(pitchWheel, "eps-pitch-wheel");
+    configureWheel(modWheel, "eps-mod-wheel");
+    pitchWheel.setTooltip("Pitch wheel - returns to centre when released");
+    modWheel.setTooltip("Modulation wheel");
+    pitchWheel.setValue(8192.0, juce::dontSendNotification);
+    modWheel.setValue(0.0, juce::dontSendNotification);
+    pitchWheel.onValueChange = [this] {
+        processor.enqueueAnalog(0, wheelToAnalog(pitchWheel.getValue()));
+    };
+    pitchWheel.onDragEnd = [this] {
+        pitchWheel.setValue(8192.0, juce::sendNotificationSync);
+    };
+    modWheel.onValueChange = [this] {
+        processor.enqueueAnalog(2, wheelToAnalog(modWheel.getValue()));
+    };
+}
+
+void Eps16PanelEditor::PianoKeyboard::PerformanceWheel::paint(
+    juce::Graphics &graphics) {
+    auto housing = getLocalBounds().toFloat().reduced(2.0f);
+    housing = housing.withSizeKeepingCentre(housing.getWidth(), 142.0f);
+    graphics.setColour(juce::Colour{0xff101110});
+    graphics.fillRoundedRectangle(housing, 2.0f);
+    graphics.setColour(juce::Colour{0xff555956});
+    graphics.drawRoundedRectangle(housing, 2.0f, 1.0f);
+
+    const auto range = getMaximum() - getMinimum();
+    const auto position = range > 0.0
+        ? static_cast<float>((getValue() - getMinimum()) / range)
+        : 0.0f;
+    const auto wheel = housing.reduced(5.0f, 7.0f);
+    juce::ColourGradient wheelShade(
+        juce::Colour{0xff292b29}, wheel.getX(), wheel.getY(),
+        juce::Colour{0xff292b29}, wheel.getX(), wheel.getBottom(), false);
+    wheelShade.addColour(0.5, juce::Colour{0xff555955});
+    graphics.setGradientFill(wheelShade);
+    graphics.fillRoundedRectangle(wheel, wheel.getWidth() * 0.45f);
+    graphics.setColour(juce::Colour{0xff777c78});
+    graphics.drawRoundedRectangle(wheel, wheel.getWidth() * 0.45f, 1.0f);
+
+    constexpr float gripHalfHeight = 10.0f;
+    const float visibleTravel =
+        wheel.getHeight() - gripHalfHeight * 2.0f - 12.0f;
+    const float gripY = wheel.getCentreY() -
+                        (position - 0.5f) * visibleTravel;
+    graphics.saveState();
+    graphics.reduceClipRegion(wheel.toNearestInt());
+    graphics.setColour(juce::Colour{0xff252725});
+    for (float grooveY = wheel.getY() + 5.0f;
+         grooveY < wheel.getBottom() - 4.0f; grooveY += 3.0f) {
+        if (std::abs(grooveY - gripY) > gripHalfHeight)
+            graphics.drawHorizontalLine(juce::roundToInt(grooveY),
+                                        wheel.getX() + 1.5f,
+                                        wheel.getRight() - 1.5f);
+    }
+    auto grip = juce::Rectangle<float>(
+        wheel.getX(), gripY - gripHalfHeight,
+        wheel.getWidth(), gripHalfHeight * 2.0f);
+    juce::ColourGradient gripShade(
+        juce::Colour{0xff303230}, grip.getX(), grip.getY(),
+        juce::Colour{0xff171817}, grip.getX(), grip.getBottom(), false);
+    graphics.setGradientFill(gripShade);
+    graphics.fillRect(grip);
+    graphics.setColour(juce::Colour{0xff696d69}.withAlpha(0.55f));
+    graphics.drawHorizontalLine(juce::roundToInt(grip.getY()),
+                                grip.getX() + 1.0f,
+                                grip.getRight() - 1.0f);
+    graphics.restoreState();
+}
+
+Eps16PanelEditor::PianoKeyboard::~PianoKeyboard() {
+    releaseAllNotes();
+    releasePerformanceControls();
+}
+
+bool Eps16PanelEditor::PianoKeyboard::isBlackKey(int note) {
+    const int pitch = note % 12;
+    return pitch == 1 || pitch == 3 || pitch == 6 || pitch == 8 || pitch == 10;
+}
+
+std::uint16_t Eps16PanelEditor::PianoKeyboard::wheelToAnalog(double value) {
+    const auto conventional = juce::jlimit(0.0, 16383.0, value);
+    return static_cast<std::uint16_t>(juce::roundToInt(
+        1023.0 - conventional * 1023.0 / 16383.0));
+}
+
+juce::Rectangle<float> Eps16PanelEditor::PianoKeyboard::keyboardArea() const {
+    auto area = getLocalBounds().toFloat().reduced(8.0f, 7.0f);
+    area.removeFromLeft(82.0f);
+    return area;
+}
+
+juce::Rectangle<float> Eps16PanelEditor::PianoKeyboard::keyBounds(
+    int note) const {
+    const auto area = keyboardArea();
+    constexpr int firstNote = 36;
+    constexpr int whiteKeyCount = 36;
+    const float whiteWidth = area.getWidth() / (float)whiteKeyCount;
+    int whiteBefore = 0;
+    for (int candidate = firstNote; candidate < note; ++candidate)
+        if (!isBlackKey(candidate)) ++whiteBefore;
+    if (!isBlackKey(note))
+        return {area.getX() + static_cast<float>(whiteBefore) * whiteWidth,
+                area.getY(),
+                whiteWidth, area.getHeight()};
+    const float blackWidth = whiteWidth * 0.61f;
+    return {area.getX() + static_cast<float>(whiteBefore) * whiteWidth -
+                            blackWidth * 0.5f,
+            area.getY(), blackWidth, area.getHeight() * 0.62f};
+}
+
+int Eps16PanelEditor::PianoKeyboard::noteAt(
+    juce::Point<float> position) const {
+    for (int note = 36; note <= 96; ++note)
+        if (isBlackKey(note) && keyBounds(note).contains(position)) return note;
+    for (int note = 36; note <= 96; ++note)
+        if (!isBlackKey(note) && keyBounds(note).contains(position)) return note;
+    return -1;
+}
+
+std::uint8_t Eps16PanelEditor::PianoKeyboard::velocityAt(int note,
+                                                         float y) const {
+    const auto key = keyBounds(note);
+    const float position = juce::jlimit(0.0f, 1.0f,
+                                        (y - key.getY()) / key.getHeight());
+    return static_cast<std::uint8_t>(juce::jlimit(
+        1, 127, 127 - juce::roundToInt(position * 126.0f)));
+}
+
+void Eps16PanelEditor::PianoKeyboard::pressAt(
+    juce::Point<float> position) {
+    const int note = noteAt(position);
+    if (note == activeNote) return;
+    releaseActiveNote();
+    if (note < 0) return;
+    const auto velocity = velocityAt(note, position.y);
+    if (processor.enqueueKeyboardTransition(
+            static_cast<std::uint8_t>(note), velocity, true)) {
+        activeNote = note;
+        repaint();
+    }
+}
+
+void Eps16PanelEditor::PianoKeyboard::releaseActiveNote() {
+    if (activeNote < 0) return;
+    processor.enqueueKeyboardTransition(static_cast<std::uint8_t>(activeNote),
+                                        1, false);
+    activeNote = -1;
+    repaint();
+}
+
+void Eps16PanelEditor::PianoKeyboard::releaseAllNotes() {
+    releaseActiveNote();
+}
+
+void Eps16PanelEditor::PianoKeyboard::releasePerformanceControls() {
+    if (pitchWheel.getValue() != 8192.0)
+        pitchWheel.setValue(8192.0, juce::sendNotificationSync);
+}
+
+void Eps16PanelEditor::PianoKeyboard::resized() {
+    auto area = getLocalBounds().reduced(8, 7);
+    auto wheelArea = area.removeFromLeft(74);
+    wheelArea.removeFromTop(13);
+    wheelArea.removeFromBottom(22);
+    pitchWheel.setBounds(wheelArea.removeFromLeft(32).reduced(3, 0));
+    wheelArea.removeFromLeft(6);
+    modWheel.setBounds(wheelArea.removeFromLeft(32).reduced(3, 0));
+}
+
+void Eps16PanelEditor::PianoKeyboard::mouseDown(
+    const juce::MouseEvent &event) {
+    pressAt(event.position);
+}
+
+void Eps16PanelEditor::PianoKeyboard::mouseDrag(
+    const juce::MouseEvent &event) {
+    if (event.mods.isLeftButtonDown()) pressAt(event.position);
+}
+
+void Eps16PanelEditor::PianoKeyboard::mouseUp(const juce::MouseEvent &) {
+    releaseActiveNote();
+}
+
+void Eps16PanelEditor::PianoKeyboard::mouseExit(const juce::MouseEvent &) {
+    releaseActiveNote();
+}
+
+void Eps16PanelEditor::PianoKeyboard::paint(juce::Graphics &graphics) {
+    graphics.fillAll(juce::Colour{0xff242625});
+    graphics.setColour(juce::Colour{0xff171817});
+    graphics.drawRect(getLocalBounds(), 1);
+    graphics.setColour(rackLabelColour.withAlpha(0.78f));
+    graphics.setFont(juce::FontOptions(9.0f));
+    graphics.drawText("PITCH", 8, getHeight() - 27, 32, 14,
+                      juce::Justification::centred);
+    graphics.drawText("MOD", 46, getHeight() - 27, 28, 14,
+                      juce::Justification::centred);
+    graphics.setColour(rackLabelColour.withAlpha(0.32f));
+    graphics.drawHorizontalLine(getHeight() / 2, 11.0f, 37.0f);
+    for (int note = 36; note <= 96; ++note) {
+        if (isBlackKey(note)) continue;
+        const auto key = keyBounds(note);
+        graphics.setColour(note == activeNote ? juce::Colour{0xff78dce8}
+                                              : juce::Colour{0xffd9d7cf});
+        graphics.fillRect(key);
+        graphics.setColour(juce::Colour{0xff2b2c2b});
+        graphics.drawRect(key, 1.0f);
+    }
+    for (int note = 36; note <= 96; ++note) {
+        if (!isBlackKey(note)) continue;
+        const auto key = keyBounds(note);
+        graphics.setColour(note == activeNote ? juce::Colour{0xff2f8992}
+                                              : juce::Colour{0xff171817});
+        graphics.fillRect(key);
+        graphics.setColour(juce::Colour{0xff050606});
+        graphics.drawRect(key, 1.0f);
+    }
+    graphics.setColour(rackLabelColour.withAlpha(0.62f));
+    graphics.setFont(10.0f);
+    auto labelArea = keyboardArea().toNearestInt();
+    labelArea.removeFromTop(labelArea.getHeight() - 18);
+    graphics.drawText("VELOCITY  127 AT TOP  •  1 AT BOTTOM",
+                      labelArea.reduced(10, 0),
+                      juce::Justification::centredRight);
+}
+
 Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
-    : AudioProcessorEditor(processorToUse), owner(processorToUse) {
+    : AudioProcessorEditor(processorToUse), owner(processorToUse),
+      pianoKeyboard(processorToUse) {
     setSize(rackWidth, rackHeight);
     setResizable(true, true);
     setResizeLimits(1080, 228, 1620, 342);
@@ -602,6 +849,22 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
     addAndMakeVisible(diskName);
     updateDiskName();
 
+    keyboardToggle.setComponentID("keyboard-toggle-button");
+    keyboardToggle.setButtonText("KEYBOARD  +");
+    keyboardToggle.setMouseClickGrabsKeyboardFocus(false);
+    keyboardToggle.setColour(juce::TextButton::buttonColourId, buttonColour);
+    keyboardToggle.setColour(juce::TextButton::buttonOnColourId,
+                             buttonColour.brighter(0.12f));
+    keyboardToggle.setColour(juce::TextButton::textColourOffId,
+                             rackLabelColour);
+    keyboardToggle.setTooltip("Show or hide the 61-key EPS keyboard");
+    keyboardToggle.onClick = [this] {
+        setKeyboardExpanded(!keyboardExpanded);
+    };
+    addAndMakeVisible(keyboardToggle);
+    pianoKeyboard.setVisible(false);
+    addChildComponent(pianoKeyboard);
+
     const std::array<std::pair<const char *, std::uint8_t>, 12> pages{{
         {"1 / ENV 1", 0x0d}, {"2 / ENV 2", 0x12}, {"3 / ENV 3", 0x13},
         {"4 / PITCH", 0x18}, {"5 / FILTER", 0x19}, {"6 / AMP", 0x1e},
@@ -678,6 +941,7 @@ Eps16PanelEditor::Eps16PanelEditor(Eps16PlusProcessor &processorToUse)
 
 Eps16PanelEditor::~Eps16PanelEditor() {
     releaseArrowKeys();
+    pianoKeyboard.releaseAllNotes();
     masterVolume.setLookAndFeel(nullptr);
     dataEntry.setLookAndFeel(nullptr);
 }
@@ -776,6 +1040,8 @@ void Eps16PanelEditor::releaseArrowKeys() {
 
 void Eps16PanelEditor::focusLost(FocusChangeType cause) {
     releaseArrowKeys();
+    pianoKeyboard.releaseAllNotes();
+    pianoKeyboard.releasePerformanceControls();
     AudioProcessorEditor::focusLost(cause);
 }
 
@@ -804,6 +1070,29 @@ void Eps16PanelEditor::updateDiskName() {
     diskName.setText("DISK: " + (name.isNotEmpty() ? name : "NONE"),
                      juce::dontSendNotification);
     diskName.setTooltip(tooltip);
+}
+
+void Eps16PanelEditor::setKeyboardExpanded(bool expanded) {
+    if (keyboardExpanded == expanded) return;
+    pianoKeyboard.releaseAllNotes();
+    pianoKeyboard.releasePerformanceControls();
+    keyboardExpanded = expanded;
+    pianoKeyboard.setVisible(expanded);
+    keyboardToggle.setButtonText(expanded ? "KEYBOARD  -" : "KEYBOARD  +");
+    const int designHeight = expanded ? expandedRackHeight : rackHeight;
+    const int targetWidth = getWidth();
+    const int targetHeight = juce::roundToInt(
+        (double)targetWidth * designHeight / rackWidth);
+    if (auto *constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio(0.0);
+    setResizeLimits(1080, juce::roundToInt(1080.0 * designHeight / rackWidth),
+                    1620, juce::roundToInt(1620.0 * designHeight / rackWidth));
+    setSize(targetWidth, targetHeight);
+    if (auto *constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio((double)rackWidth / designHeight);
+    setSize(targetWidth, targetHeight);
+    resized();
+    repaint();
 }
 
 void Eps16PanelEditor::timerCallback() {
@@ -852,8 +1141,10 @@ void Eps16PanelEditor::timerCallback() {
 void Eps16PanelEditor::paint(juce::Graphics &graphics) {
     graphics.fillAll(panelColour);
     if (pageButtons.front() == nullptr) return;
-    const float scale = juce::jmin((float)getWidth() / rackWidth,
-                                   (float)getHeight() / rackHeight);
+    const int designHeight = keyboardExpanded ? expandedRackHeight : rackHeight;
+    const float scale = juce::jmin(
+        (float)getWidth() / rackWidth,
+        (float)getHeight() / static_cast<float>(designHeight));
     graphics.setColour(rackLabelColour);
 
     auto above = [&graphics, scale](const PanelButton *button,
@@ -1012,11 +1303,13 @@ void Eps16PanelEditor::paint(juce::Graphics &graphics) {
     above(enterButton, "YES", 13);
     below(enterButton, "ENTER", 12);
 
-    auto baseRect = [this, scale](int x, int y, int width, int height) {
+    auto baseRect = [this, scale, designHeight](int x, int y, int width,
+                                                int height) {
         const int offsetX =
             (getWidth() - juce::roundToInt(rackWidth * scale)) / 2;
         const int offsetY =
-            (getHeight() - juce::roundToInt(rackHeight * scale)) / 2;
+            (getHeight() - juce::roundToInt(
+                               static_cast<float>(designHeight) * scale)) / 2;
         return juce::Rectangle<int>(
             offsetX + juce::roundToInt((float)x * scale),
             offsetY + juce::roundToInt((float)y * scale),
@@ -1065,10 +1358,14 @@ void Eps16PanelEditor::paint(juce::Graphics &graphics) {
 
 void Eps16PanelEditor::resized() {
     if (pageButtons.front() == nullptr) return;
-    const float scale = juce::jmin((float)getWidth() / rackWidth,
-                                   (float)getHeight() / rackHeight);
+    const int designHeight = keyboardExpanded ? expandedRackHeight : rackHeight;
+    const float scale = juce::jmin(
+        (float)getWidth() / rackWidth,
+        (float)getHeight() / static_cast<float>(designHeight));
     const int offsetX = (getWidth() - juce::roundToInt(rackWidth * scale)) / 2;
-    const int offsetY = (getHeight() - juce::roundToInt(rackHeight * scale)) / 2;
+    const int offsetY =
+        (getHeight() - juce::roundToInt(
+                           static_cast<float>(designHeight) * scale)) / 2;
     auto rackRect = [scale, offsetX, offsetY](int x, int y,
                                               int width, int height) {
         return juce::Rectangle<int>(
@@ -1083,7 +1380,7 @@ void Eps16PanelEditor::resized() {
                                              juce::Font::plain)));
     status.setBounds({});
     masterVolume.setBounds(rackRect(36, 25, 76, 198));
-    dataEntry.setBounds(rackRect(464, 26, 68, 199));
+    dataEntry.setBounds(rackRect(452, 26, 76, 199));
 
     const int pageX[3] = {294, 345, 396};
     const int pageY[3] = {51, 105, 159};
@@ -1122,5 +1419,8 @@ void Eps16PanelEditor::resized() {
     diskName.setBounds(rackRect(1160, 6, 168, 17));
     diskName.setFont(juce::Font(juce::FontOptions(
         "Helvetica Neue", 10.0f * scale, juce::Font::plain)));
+    keyboardToggle.setBounds(rackRect(618, 263, 114, 18));
+    pianoKeyboard.setBounds(rackRect(0, rackHeight, rackWidth,
+                                     keyboardHeight));
 
 }

@@ -12,6 +12,11 @@ using namespace eps16::vst3;
 struct CaptureSink final : EmulatorSink {
     struct Message { std::uint8_t value; std::uint64_t cycle; };
     struct AnalogMessage { unsigned int channel; std::uint16_t value; };
+    struct KeyboardMessage {
+        std::uint8_t note;
+        std::uint8_t velocity;
+        bool pressed;
+    };
     void prepare(double rate) override { preparedRate = rate; }
     void runUntil(std::uint64_t cycle) override {
         assert(cycle >= lastRunCycle);
@@ -23,23 +28,24 @@ struct CaptureSink final : EmulatorSink {
         lastMidiData1 = data1;
         lastMidiData2 = data2;
     }
-    void midiBytes(const std::uint8_t *bytes,
-               std::size_t size,
-               std::uint64_t cycle) override
-    {
-        (void)bytes;
-        (void)size;
-        (void)cycle;
+    void midi(std::uint8_t status, std::uint8_t data1, std::uint8_t data2,
+              std::uint64_t cycle) override {
+        midiMessages.push_back({status, cycle});
+        lastMidiData1 = data1;
+        lastMidiData2 = data2;
     }
 
-    std::size_t drainMidiOutput(std::uint8_t *bytes,
-                            std::size_t capacity) override
-    {
-        (void)bytes;
-        (void)capacity;
+    void keyboard(std::uint8_t note, std::uint8_t velocity, bool pressed,
+                  std::uint64_t) override {
+        keyboardMessages.push_back({note, velocity, pressed});
+    }
+
+    void midiBytes(const std::uint8_t *, std::size_t, std::uint64_t) override {}
+
+    std::size_t drainMidiOutput(std::uint8_t *, std::size_t) override {
         return 0;
     }
-    
+
     void panelByte(std::uint8_t value, std::uint64_t cycle) override {
         panelMessages.push_back({value, cycle});
     }
@@ -69,6 +75,7 @@ struct CaptureSink final : EmulatorSink {
     std::vector<Message> midiMessages;
     std::vector<Message> panelMessages;
     std::vector<AnalogMessage> analogMessages;
+    std::vector<KeyboardMessage> keyboardMessages;
 };
 
 int main() {
@@ -81,6 +88,13 @@ int main() {
     assert(bridge.enqueueAnalog(3, 128));
     assert(bridge.enqueueAnalog(3, 384));
     assert(bridge.enqueueAnalog(3, 715));
+    assert(bridge.enqueueAnalog(0, 511));
+    assert(bridge.enqueueAnalog(2, 0));
+    assert(bridge.enqueueKeyboardTransition(36, 127, true));
+    assert(bridge.enqueueKeyboardTransition(36, 1, false));
+    assert(!bridge.enqueueKeyboardTransition(35, 100, true));
+    assert(!bridge.enqueueKeyboardTransition(97, 100, true));
+    assert(!bridge.enqueueKeyboardTransition(60, 0, true));
 
     constexpr int frames = 48000;
     std::array<float, frames> inputLeft{};
@@ -108,11 +122,22 @@ int main() {
     assert(sink.panelMessages[2].value == 0x23);
     assert(sink.panelMessages[3].value == 0x00);
     assert(sink.panelMessages[2].cycle >= 500000);
-    assert(sink.analogChannel == 3 && sink.analogValue == 715);
-    assert(sink.analogMessages.size() == 3);
+    assert(sink.analogChannel == 2 && sink.analogValue == 0);
+    assert(sink.analogMessages.size() == 5);
     assert(sink.analogMessages[0].value == 128);
     assert(sink.analogMessages[1].value == 384);
     assert(sink.analogMessages[2].value == 715);
+    assert(sink.analogMessages[3].channel == 0 &&
+           sink.analogMessages[3].value == 511);
+    assert(sink.analogMessages[4].channel == 2 &&
+           sink.analogMessages[4].value == 0);
+    assert(sink.keyboardMessages.size() == 2);
+    assert(sink.keyboardMessages[0].note == 36 &&
+           sink.keyboardMessages[0].velocity == 127 &&
+           sink.keyboardMessages[0].pressed);
+    assert(sink.keyboardMessages[1].note == 36 &&
+           sink.keyboardMessages[1].velocity == 0 &&
+           !sink.keyboardMessages[1].pressed);
     assert(sink.midiMessages.size() == 7);
     assert(sink.midiMessages[0].cycle == 0);
     assert(sink.midiMessages[1].value == 0xa0 &&
@@ -127,7 +152,7 @@ int main() {
            sink.midiMessages[5].cycle == 5000000);
     assert(sink.midiMessages[6].value == 0xf8 &&
            sink.midiMessages[6].cycle == 6000000);
-    assert(sink.lastMidiData1 == 60 && sink.lastMidiData2 == 0);
+    assert(sink.lastMidiData1 == 0 && sink.lastMidiData2 == 0);
     assert(bridge.droppedControls() == 0);
 
     DawClock clock;
@@ -219,6 +244,9 @@ int main() {
     assert(partitionedBridge.cpuCycles() == bridge.cpuCycles());
     assert(partitionedSink.lastRunCycle == sink.lastRunCycle);
     assert(partitionedBridge.resetTimeline());
+    /* A real resetTimeline() is paired with restoring/rebasing the machine
+       sink. Mirror that new absolute-cycle origin in the capture sink. */
+    partitionedSink.lastRunCycle = 0;
     partitionedBridge.process(inputLeft.data(), inputRight.data(),
                               outputLeft.data(), outputRight.data(), 1,
                               nullptr, 0);

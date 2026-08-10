@@ -21,6 +21,11 @@ void eps16_probe_machine_end(Eps16ProbeMachine *machine);
 int eps16_probe_machine_initialize(const char *rom_path, const char *kpc_path,
                                    const char *os_disk_path,
                                    char *error, size_t error_size);
+int eps16_probe_machine_initialize_split_rom(const char *upper_rom_path,
+                                             const char *lower_rom_path,
+                                             const char *kpc_path,
+                                             const char *os_disk_path,
+                                             char *error, size_t error_size);
 int eps16_probe_machine_insert_disk(const char *disk_path,
                                     char *error, size_t error_size);
 int eps16_probe_machine_create_blank_disk(char *error, size_t error_size);
@@ -37,6 +42,8 @@ typedef struct {
 size_t eps16_probe_machine_drain_audio(Eps16ProbeAudioFrame *frames,
                                        size_t capacity);
 void eps16_probe_machine_midi(uint8_t status, uint8_t data1, uint8_t data2);
+void eps16_probe_machine_keyboard(uint8_t note, uint8_t velocity,
+                                  int pressed);
 size_t eps16_probe_machine_midi_bytes(const uint8_t *bytes, size_t size);
 size_t eps16_probe_machine_drain_midi_output(uint8_t *bytes, size_t capacity);
 size_t eps16_probe_machine_midi_rx_consumed(void);
